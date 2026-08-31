@@ -1,0 +1,66 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 1024 1024"
+  role="img"
+  aria-labelledby="title description"
+>
+  <title id="title">JobGlass app icon</title>
+  <desc id="description">
+    A clear inspection pane over three scheduled job lines.
+  </desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#173d35" />
+      <stop offset="1" stop-color="#0c1d19" />
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4fffb" stop-opacity="0.96" />
+      <stop offset="1" stop-color="#b8d8cf" stop-opacity="0.84" />
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow
+        dx="0"
+        dy="30"
+        stdDeviation="32"
+        flood-color="#05100d"
+        flood-opacity="0.48"
+      />
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#background)" />
+  <g stroke-linecap="round">
+    <path d="M204 337h616" stroke="#6c9488" stroke-width="34" />
+    <path d="M204 512h616" stroke="#6c9488" stroke-width="34" />
+    <path d="M204 687h616" stroke="#6c9488" stroke-width="34" />
+    <circle cx="328" cy="337" r="33" fill="#e7ad62" />
+    <circle cx="610" cy="512" r="33" fill="#72cbb5" />
+    <circle cx="470" cy="687" r="33" fill="#d87b6e" />
+  </g>
+  <g filter="url(#shadow)">
+    <rect
+      x="236"
+      y="190"
+      width="552"
+      height="644"
+      rx="108"
+      fill="url(#glass)"
+      stroke="#ffffff"
+      stroke-opacity="0.72"
+      stroke-width="18"
+    />
+    <path
+      d="M312 300h192"
+      stroke="#24594c"
+      stroke-width="38"
+      stroke-linecap="round"
+    />
+    <path
+      d="M312 417h400M312 523h316M312 629h358M312 735h226"
+      stroke="#2f6759"
+      stroke-opacity="0.82"
+      stroke-width="26"
+      stroke-linecap="round"
+    />
+    <circle cx="676" cy="300" r="42" fill="#e7ad62" />
+  </g>
+</svg>

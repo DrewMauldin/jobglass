@@ -72,11 +72,10 @@ cargo audit
 ## Project structure
 
 ```text
-src/                         React presentation and export review UI
-src/components/              Focused accessible UI components
-src/lib/                     Pure filtering, timeline and export formatting
+src/App.tsx                  React presentation, selectors and export review UI
+src/data/                    Deterministic browser fixture data
 src-tauri/src/               Rust core, adapters, normalisation and diagnostics
-src-tauri/tests/             Cross-platform fixtures and integration tests
+src-tauri/tests/             Cross-platform fixture integration tests
 fixtures/{macos,linux,windows}/  Sanitised native evidence bundles
 docs/                        User, contributor, security and release documentation
 docs/decisions/              Architecture decision records

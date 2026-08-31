@@ -6,7 +6,7 @@
 
 - [x] Rust, npm and Tauri versions are pinned with one lockfile per ecosystem.
 - [x] Dependency lifecycle scripts default-deny and required exceptions are version-pinned.
-- [ ] Fast, task and full quality commands are reproducible.
+- [x] Fast, task and full quality commands are reproducible.
 
 **Verification:** `npm ci`, `npm run check:fast`, `cargo metadata --locked --manifest-path src-tauri/Cargo.toml`
 **Dependencies:** None
@@ -39,8 +39,8 @@
 
 ## Checkpoint: Foundation
 
-- [ ] Full Rust and frontend checks pass.
-- [ ] Floor guard reports clean.
+- [x] Full Rust and frontend checks pass.
+- [x] Floor guard reports clean.
 
 ## Task 4: Parse launchd definitions
 
@@ -95,7 +95,7 @@
 **Acceptance criteria:**
 
 - [x] Namespaced XML actions, principals, settings and triggers normalise.
-- [ ] Disabled, malformed and access-denied cases are explicit.
+- [x] Disabled, malformed and access-denied cases are explicit.
 
 **Verification:** Windows fixture integration tests and Windows hosted compilation
 **Dependencies:** Task 3
@@ -104,8 +104,8 @@
 
 ## Checkpoint: Native evidence
 
-- [ ] Every platform fixture category passes.
-- [ ] Live Mac sample matches privacy-safe native evidence.
+- [x] Every platform fixture category passes.
+- [x] Live Mac sample matches privacy-safe native evidence.
 
 ## Task 9: Add deterministic diagnostics
 
@@ -145,8 +145,8 @@
 
 ## Checkpoint: Product intelligence
 
-- [ ] Seeded required findings reach normalised output and exports.
-- [ ] No sensitive fixture values appear in generated reports.
+- [x] Seeded required findings reach normalised output and exports.
+- [x] No sensitive fixture values appear in generated reports.
 
 ## Task 12: Build accessible overview shell
 
@@ -189,7 +189,7 @@
 **Acceptance criteria:**
 
 - [x] Export cannot proceed until a redaction policy is reviewed.
-- [ ] Light, dark, reduced-motion and responsive layouts are polished.
+- [x] Light, dark, reduced-motion and responsive layouts are polished.
 
 **Verification:** export interaction tests, theme screenshots, responsive Playwright matrix
 **Dependencies:** Tasks 10 and 14
@@ -200,7 +200,7 @@
 
 **Acceptance criteria:**
 
-- [ ] macOS app is visually inspected at multiple sizes and both themes.
+- [x] macOS app is visually inspected at multiple sizes and both themes.
 - [ ] Keyboard, VoiceOver spot checks, console and performance evidence are recorded.
 
 **Verification:** signed-off `docs/verification/v0.1.0.md` evidence
@@ -210,8 +210,8 @@
 
 ## Checkpoint: Desktop
 
-- [ ] Zero serious or critical accessibility findings.
-- [ ] No console warnings; performance budgets pass.
+- [x] Zero serious or critical accessibility findings.
+- [x] No console warnings; performance budgets pass.
 
 ## Task 17: Add CI and packaging
 
@@ -229,8 +229,8 @@
 
 **Acceptance criteria:**
 
-- [ ] Install, quick start, permissions, architecture, privacy, contributing, development, troubleshooting and release docs are complete.
-- [ ] Templates, conduct, licence, roadmap and discoverability metadata are ready.
+- [x] Install, quick start, permissions, architecture, privacy, contributing, development, troubleshooting and release docs are complete.
+- [x] Templates, conduct, licence, roadmap and discoverability metadata are ready.
 
 **Verification:** docs link checker and fresh-clone commands
 **Dependencies:** Task 17
@@ -241,7 +241,7 @@
 
 **Acceptance criteria:**
 
-- [ ] README screenshots and hero animation come from the actual app.
+- [x] README screenshots and hero animation come from the actual app.
 - [ ] Public HTTPS site routes and release/download links resolve.
 
 **Verification:** browser screenshots and public URL checks
