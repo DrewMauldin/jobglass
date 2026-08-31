@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use crate::adapters::warning;
 use crate::model::{
-    EnabledState, Evidence, JobScope, ParseWarning, Provenance, RunTime, ScheduleKind,
-    ScheduleSpec, ScheduledJob, SchedulerKind, TimezoneBasis, Trigger,
+    EnabledState, Evidence, JobScope, LastOutcome, OutcomeState, ParseWarning, Provenance, RunTime,
+    ScheduleKind, ScheduleSpec, ScheduledJob, SchedulerKind, TimezoneBasis, Trigger,
 };
+use chrono::NaiveDateTime;
 
 pub fn parse_timer_show(input: &str, scope: JobScope) -> Result<ScheduledJob, ParseWarning> {
     let properties = input
@@ -14,7 +15,7 @@ pub fn parse_timer_show(input: &str, scope: JobScope) -> Result<ScheduledJob, Pa
         .collect::<BTreeMap<_, _>>();
     let identifier = properties
         .get("Id")
-        .filter(|value| value.ends_with(".timer"))
+        .filter(|value| valid_timer_identifier(value))
         .ok_or_else(|| {
             warning(
                 "systemd.id",
@@ -98,31 +99,41 @@ pub fn parse_timer_show(input: &str, scope: JobScope) -> Result<ScheduledJob, Pa
     }
     job.timezone_basis = Evidence::available(
         TimezoneBasis {
-            name: "systemd manager timezone".into(),
-            source: "systemctl show".into(),
+            name: "UTC".into(),
+            source: "systemctl with TZ=UTC".into(),
         },
         provenance.clone(),
     );
     if let Some(next) = properties
         .get("NextElapseUSecRealtime")
         .filter(|value| !value.is_empty())
+        && let Some(run) = normalise_timestamp(next)
     {
-        job.next_run = Evidence::available(
-            RunTime {
-                iso8601: (*next).into(),
-                timezone_basis: "native systemd text".into(),
-            },
-            provenance.clone(),
-        );
+        job.next_run = Evidence::available(run, provenance.clone());
     }
     if let Some(last) = properties
         .get("LastTriggerUSec")
         .filter(|value| !value.is_empty())
+        && let Some(run) = normalise_timestamp(last)
     {
-        job.last_run = Evidence::available(
-            RunTime {
-                iso8601: (*last).into(),
-                timezone_basis: "native systemd text".into(),
+        job.last_run = Evidence::available(run, provenance.clone());
+    }
+    if let Some(result) = properties.get("Result").filter(|value| !value.is_empty()) {
+        let state = match *result {
+            "success" => OutcomeState::Success,
+            "running" => OutcomeState::Running,
+            "exit-code" | "signal" | "timeout" | "watchdog" | "resources" | "failed" => {
+                OutcomeState::Failed
+            }
+            _ => OutcomeState::Unknown,
+        };
+        job.last_outcome = Evidence::available(
+            LastOutcome {
+                state,
+                native_code: properties
+                    .get("ExecMainStatus")
+                    .and_then(|value| value.parse::<i64>().ok()),
+                explanation: format!("systemd Result={result}"),
             },
             provenance.clone(),
         );
@@ -137,6 +148,42 @@ pub fn parse_timer_show(input: &str, scope: JobScope) -> Result<ScheduledJob, Pa
     dependencies.dedup();
     job.dependencies = Evidence::available(dependencies, provenance);
     Ok(job)
+}
+
+pub fn valid_timer_identifier(identifier: &str) -> bool {
+    !identifier.is_empty()
+        && identifier.len() <= 256
+        && identifier.ends_with(".timer")
+        && !identifier.starts_with('-')
+        && identifier.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, ':' | '_' | '.' | '@' | '-')
+        })
+}
+
+fn normalise_timestamp(value: &str) -> Option<RunTime> {
+    if value.is_empty() || value.eq_ignore_ascii_case("n/a") {
+        return None;
+    }
+    if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Some(RunTime {
+            iso8601: parsed.to_rfc3339(),
+            timezone_basis: "native RFC3339 offset".into(),
+        });
+    }
+    let mut fields = value.split_whitespace();
+    let _weekday = fields.next()?;
+    let date = fields.next()?;
+    let time = fields.next()?;
+    let timezone = fields.next()?;
+    if !matches!(timezone, "UTC" | "UCT" | "GMT" | "Z") || fields.next().is_some() {
+        return None;
+    }
+    let parsed =
+        NaiveDateTime::parse_from_str(&format!("{date} {time}"), "%Y-%m-%d %H:%M:%S").ok()?;
+    Some(RunTime {
+        iso8601: parsed.and_utc().to_rfc3339(),
+        timezone_basis: "UTC from systemctl TZ=UTC".into(),
+    })
 }
 
 fn provenance(source: &str) -> Provenance {

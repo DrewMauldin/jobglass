@@ -94,6 +94,7 @@ export function App({
           evidence(job.displayName),
           evidence(job.nativeIdentifier),
           evidence(job.executable),
+          evidence(job.schedule)?.nativeExpression,
           evidence(job.scheduleExplanation),
         ].some((value) =>
           (value ?? "").toLocaleLowerCase().includes(normalisedQuery),

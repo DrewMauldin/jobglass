@@ -6,6 +6,7 @@ use jobglass_lib::model::{
 use std::time::{Duration, Instant};
 
 fn main() {
+    let started = Instant::now();
     let jobs = (0..5_000)
         .map(|index| {
             let source = format!("fixture:{index}");
@@ -32,8 +33,7 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
-    let started = Instant::now();
-    let findings = diagnose(&jobs, &[], &[], Utc::now(), |_| true);
+    let findings = diagnose(&jobs, &[], &[], Utc::now(), |_| true, |_| true);
     let elapsed = started.elapsed();
     println!(
         "normalised and diagnosed {} fixture jobs with {} findings in {elapsed:?}",

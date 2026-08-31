@@ -1,8 +1,12 @@
 use crate::input::{
-    BoundaryError, MAX_INPUT_BYTES, decode_bounded, read_bounded_file, read_bounded_file_bytes,
+    BoundaryError, MAX_INPUT_BYTES, decode_bounded, local_directory_exists,
+    local_executable_exists, read_bounded_file, read_bounded_file_bytes, validate_directory_root,
 };
-use crate::process::{MAX_OUTPUT_BYTES, run_program_for_test};
+use crate::process::{
+    MAX_OUTPUT_BYTES, NativeTool, decode_native_output_for_test, run_program_for_test,
+};
 use proptest::prelude::*;
+use std::path::Path;
 use std::time::Duration;
 
 #[test]
@@ -59,6 +63,79 @@ fn rejects_symlink_inputs() {
         read_bounded_file(&link, &[directory.path()]),
         Err(BoundaryError::SymlinkRejected)
     ));
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_symlinked_roots_and_path_probe_type_confusion() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    let parent = tempfile::tempdir().expect("parent temp directory");
+    let root = parent.path().join("root");
+    let root_link = parent.path().join("root-link");
+    std::fs::create_dir(&root).expect("fixture root");
+    symlink(&root, &root_link).expect("fixture root symlink");
+    assert!(matches!(
+        validate_directory_root(&root_link),
+        Err(BoundaryError::SymlinkRejected)
+    ));
+
+    let executable = root.join("tool");
+    let directory = root.join("working");
+    let executable_link = root.join("tool-link");
+    std::fs::write(&executable, "fixture").expect("fixture executable");
+    let mut permissions = std::fs::metadata(&executable)
+        .expect("fixture metadata")
+        .permissions();
+    permissions.set_mode(0o700);
+    std::fs::set_permissions(&executable, permissions).expect("fixture permissions");
+    std::fs::create_dir(&directory).expect("fixture working directory");
+    symlink(&executable, &executable_link).expect("fixture executable symlink");
+
+    let executable = executable.canonicalize().expect("canonical executable");
+    let directory = directory.canonicalize().expect("canonical directory");
+    assert!(local_executable_exists(
+        executable.to_str().expect("UTF-8 path")
+    ));
+    assert!(!local_executable_exists(
+        directory.to_str().expect("UTF-8 path")
+    ));
+    assert!(!local_executable_exists(
+        executable_link.to_str().expect("UTF-8 path")
+    ));
+    assert!(local_directory_exists(
+        directory.to_str().expect("UTF-8 path")
+    ));
+    assert!(!local_directory_exists(
+        executable.to_str().expect("UTF-8 path")
+    ));
+    assert!(!local_directory_exists("//remote.example/share"));
+}
+
+#[test]
+fn native_tools_resolve_to_fixed_absolute_paths() {
+    for tool in [
+        NativeTool::Launchctl,
+        NativeTool::Crontab,
+        NativeTool::Systemctl,
+        NativeTool::Schtasks,
+        NativeTool::PowerShell,
+    ] {
+        let program = tool.program().expect("fixed native tool path");
+        assert!(Path::new(&program).is_absolute(), "{program:?}");
+    }
+}
+
+#[test]
+fn native_output_decoder_accepts_real_utf16le_shape() {
+    let mut bytes = vec![0xff, 0xfe];
+    for unit in "<Tasks/>".encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    assert_eq!(
+        decode_native_output_for_test(bytes).expect("UTF-16LE output"),
+        "<Tasks/>"
+    );
 }
 
 #[cfg(unix)]

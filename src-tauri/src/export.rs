@@ -32,11 +32,12 @@ pub fn export_json(
     policy: ExportPolicy,
 ) -> Result<String, ExportError> {
     require_review(policy)?;
+    let findings = prepared_findings(findings, jobs, policy);
     let jobs = prepared_jobs(jobs, policy);
     serde_json::to_string_pretty(&ExportDocument {
         schema_version: "1.0",
         jobs: &jobs,
-        findings,
+        findings: &findings,
     })
     .map_err(|error| ExportError::Serialisation(error.to_string()))
 }
@@ -127,6 +128,38 @@ fn prepared_jobs(jobs: &[ScheduledJob], policy: ExportPolicy) -> Vec<ScheduledJo
     jobs
 }
 
+fn prepared_findings(
+    findings: &[Finding],
+    original_jobs: &[ScheduledJob],
+    policy: ExportPolicy,
+) -> Vec<Finding> {
+    if policy.include_arguments {
+        return findings.to_vec();
+    }
+    let mut arguments = original_jobs
+        .iter()
+        .filter_map(|job| match &job.arguments {
+            Evidence::Available { value, .. } => Some(value.as_slice()),
+            Evidence::Unavailable { .. } => None,
+        })
+        .flatten()
+        .filter(|argument| !argument.is_empty())
+        .collect::<Vec<_>>();
+    arguments.sort_by_key(|argument| std::cmp::Reverse(argument.len()));
+    findings
+        .iter()
+        .cloned()
+        .map(|mut finding| {
+            for item in &mut finding.evidence {
+                for argument in &arguments {
+                    *item = item.replace(argument.as_str(), "<redacted>");
+                }
+            }
+            finding
+        })
+        .collect()
+}
+
 fn evidence_text<T>(evidence: &Evidence<T>, render: impl FnOnce(&T) -> String) -> String {
     match evidence {
         Evidence::Available { value, .. } => render(value),
@@ -139,7 +172,12 @@ fn scheduler_name(scheduler: &SchedulerKind) -> String {
 }
 
 fn csv_escape(value: &str) -> String {
-    format!("\"{}\"", value.replace('"', "\"\""))
+    let neutralised = if value.starts_with(['=', '+', '-', '@']) {
+        format!("'{value}")
+    } else {
+        value.to_owned()
+    };
+    format!("\"{}\"", neutralised.replace('"', "\"\""))
 }
 
 fn html_escape(value: &str) -> String {

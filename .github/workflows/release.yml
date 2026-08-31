@@ -17,16 +17,84 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26.7.0
       - name: Match manifests to tag
         run: node scripts/check-version.mjs "$GITHUB_REF_NAME"
+      - name: Require an annotated tag reachable from main
+        shell: bash
+        run: |
+          test "$(git cat-file -t "$GITHUB_REF_NAME")" = tag
+          tag_commit=$(git rev-list --max-count=1 "$GITHUB_REF_NAME")
+          git merge-base --is-ancestor "$tag_commit" origin/main
+
+  quality:
+    name: Re-run release quality and security gates
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out complete source history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26.7.0
+          cache: npm
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential curl file libayatana-appindicator3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf wget
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component clippy,llvm-tools-preview,rustfmt --no-self-update
+          rustup default 1.98.0
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@bc2d2e71bd35c5549942babaa51a89c586b981d1 # v2.8.1
+        with:
+          workspaces: src-tauri -> target
+      - name: Install test and audit tools
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          cargo install cargo-llvm-cov --version 0.9.0 --locked
+          cargo install cargo-audit --version 0.22.2 --locked
+      - name: Check frontend and browser behavior
+        run: |
+          npm run check:task
+          npm run test:coverage
+          npm run coverage:changed
+          npm run test:e2e
+          npm run size
+      - name: Check Rust quality, coverage, and performance
+        run: |
+          cargo fmt --check --manifest-path src-tauri/Cargo.toml
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --all-features
+          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+          cargo llvm-cov --locked --manifest-path src-tauri/Cargo.toml --all-features --fail-under-lines 80
+          cargo bench --locked --manifest-path src-tauri/Cargo.toml --bench diagnostics
+      - name: Audit dependencies
+        run: |
+          npm audit --audit-level=high
+          cargo audit --file src-tauri/Cargo.lock
+      - name: Scan committed history for secrets
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate workflow syntax
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          actionlint
 
   build:
     name: Build ${{ matrix.name }} package
-    needs: version
+    needs: [version, quality]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -61,7 +129,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install --yes build-essential curl file libayatana-appindicator3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev patchelf wget
       - name: Install pinned Rust toolchain
         run: |
           rustup toolchain install 1.98.0 --profile minimal --component clippy,rustfmt --no-self-update
@@ -119,19 +187,24 @@ jobs:
         run: |
           checksum_file=$(mktemp)
           cd release-input
-          find . -type f -print0 | LC_ALL=C sort -z | xargs -0 shasum -a 256 > "$checksum_file"
+          find . -type f -printf '%P\0' | LC_ALL=C sort -z | xargs -0 --no-run-if-empty shasum -a 256 > "$checksum_file"
           mv "$checksum_file" SHA256SUMS
       - name: Generate GitHub build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: release-input/*
-      - name: Create or update draft release
+      - name: Create or replace only a draft release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" release-input/* --clobber
+            is_draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)
+            test "$is_draft" = true || { echo "refusing to mutate published release $GITHUB_REF_NAME" >&2; exit 1; }
+            while IFS= read -r asset; do
+              test -z "$asset" || gh release delete-asset "$GITHUB_REF_NAME" "$asset" --yes
+            done < <(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
+            gh release upload "$GITHUB_REF_NAME" release-input/*
           else
             gh release create "$GITHUB_REF_NAME" release-input/* --draft --generate-notes --title "JobGlass $GITHUB_REF_NAME" --notes "Unsigned community packages. Verify SHA256SUMS and GitHub provenance before installation; platform code signing and notarisation are not claimed."
           fi

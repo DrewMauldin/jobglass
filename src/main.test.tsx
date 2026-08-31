@@ -50,6 +50,15 @@ describe("JobGlass desktop experience", () => {
     ).toBeNull();
 
     await user.clear(screen.getByRole("searchbox", { name: "Search jobs" }));
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search jobs" }),
+      "*-*-* 03:30:00",
+    );
+    expect(
+      screen.getByRole("button", { name: /nightly backup/i }),
+    ).toBeVisible();
+
+    await user.clear(screen.getByRole("searchbox", { name: "Search jobs" }));
     const viewControl = screen.getByRole("group", { name: "Job view" });
     const timelineButton = within(viewControl).getByRole("button", {
       name: "Timeline",
@@ -123,6 +132,59 @@ describe("JobGlass desktop experience", () => {
     expect(html).toContain("Nightly backup");
     expect(html).toContain("&lt;redacted&gt;");
     expect(html).not.toContain("--incremental");
+  });
+
+  it("redacts argument-derived finding evidence and neutralises CSV formulas", () => {
+    const secret = '=HYPERLINK("https://example.invalid")';
+    const firstJob = demoBundle.jobs[0];
+    if (!firstJob) throw new Error("demo fixture must contain a job");
+    const bundle = {
+      ...demoBundle,
+      jobs: [
+        {
+          ...firstJob,
+          displayName: {
+            ...firstJob.displayName,
+            availability: "available" as const,
+            value: "=sensitive name",
+          },
+          arguments: {
+            ...firstJob.arguments,
+            availability: "available" as const,
+            value: [secret],
+          },
+        },
+      ],
+      findings: [
+        {
+          id: "finding_secret",
+          code: "duplicateCommand",
+          severity: "warning" as const,
+          title: "Duplicate command",
+          explanation: "Same executable and arguments",
+          jobIds: [firstJob.id],
+          evidence: [`command: /usr/local/sbin/backup ${secret}`],
+        },
+      ],
+    };
+
+    const json = renderBrowserExport(bundle, "json", {
+      reviewed: true,
+      includeArguments: false,
+    });
+    const csv = renderBrowserExport(bundle, "csv", {
+      reviewed: true,
+      includeArguments: false,
+    });
+    const parsed = JSON.parse(json) as {
+      findings: { evidence: string[] }[];
+    };
+
+    expect(parsed.findings[0]?.evidence).toEqual([
+      "command: /usr/local/sbin/backup <redacted>",
+    ]);
+    expect(csv).toContain("'=sensitive name");
+    expect(csv).not.toContain('"=sensitive name"');
   });
 
   it("blocks export until privacy review is acknowledged", async () => {

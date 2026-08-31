@@ -1,5 +1,9 @@
+use chrono::{DateTime, Utc};
 use jobglass_lib::adapters::{cron, launchd, systemd, windows};
-use jobglass_lib::model::{EnabledState, Evidence, JobScope, OutcomeState, ScheduleKind};
+use jobglass_lib::diagnostics::{Visibility, VisibilityStatus, diagnose};
+use jobglass_lib::model::{
+    EnabledState, Evidence, JobScope, OutcomeState, ParseWarning, ScheduleKind,
+};
 use std::path::PathBuf;
 
 fn fixture(path: &str) -> String {
@@ -10,11 +14,28 @@ fn fixture(path: &str) -> String {
     std::fs::read_to_string(path).expect("fixture should be readable")
 }
 
+fn fixture_bytes(path: &str) -> Vec<u8> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("fixtures")
+        .join(path);
+    std::fs::read(path).expect("fixture should be readable")
+}
+
 fn value<T>(evidence: &Evidence<T>) -> &T {
     match evidence {
         Evidence::Available { value, .. } => value,
         Evidence::Unavailable { reason, .. } => panic!("expected evidence, got {reason:?}"),
     }
+}
+
+fn available_like<T>(value: T, evidence: &Evidence<T>) -> Evidence<T> {
+    let provenance = match evidence {
+        Evidence::Available { provenance, .. } | Evidence::Unavailable { provenance, .. } => {
+            provenance.clone()
+        }
+    };
+    Evidence::available(value, provenance)
 }
 
 #[test]
@@ -106,6 +127,24 @@ fn cron_variants_keep_environment_keys_and_report_bad_lines() {
 }
 
 #[test]
+fn cron_rejects_out_of_range_fields_and_unknown_nicknames() {
+    let result = cron::parse_crontab(
+        "99 99 99 99 99 /bin/true\n@bogus /bin/true\n",
+        "malformed fixture",
+        JobScope::User,
+        Some("fixture-user"),
+        false,
+    );
+
+    assert!(result.jobs.is_empty());
+    assert_eq!(result.warnings.len(), 2);
+    assert_ne!(
+        result.warnings[0].source_reference,
+        result.warnings[1].source_reference
+    );
+}
+
+#[test]
 fn systemd_timer_preserves_calendar_and_monotonic_evidence() {
     let job = systemd::parse_timer_show(
         &fixture("linux/systemd/backup.timer.show"),
@@ -117,6 +156,12 @@ fn systemd_timer_preserves_calendar_and_monotonic_evidence() {
     assert_eq!(value(&job.schedule).kind, ScheduleKind::Composite);
     assert_eq!(value(&job.target_service), "backup.service");
     assert!(value(&job.dependencies).contains(&"network-online.target".into()));
+    assert!(DateTime::parse_from_rfc3339(&value(&job.next_run).iso8601).is_ok());
+    assert!(DateTime::parse_from_rfc3339(&value(&job.last_run).iso8601).is_ok());
+    assert_eq!(value(&job.last_outcome).state, OutcomeState::Success);
+    assert!(systemd::valid_timer_identifier("backup.timer"));
+    assert!(!systemd::valid_timer_identifier("--host=remote.timer"));
+    assert!(!systemd::valid_timer_identifier("../../remote.timer"));
 }
 
 #[test]
@@ -138,4 +183,123 @@ fn windows_namespaced_xml_normalises_actions_principal_and_state() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn windows_collection_preserves_each_task_scope_and_runtime() {
+    let mut result = windows::parse_task_xml_collection(
+        &fixture_bytes("windows/multiple-tasks.xml"),
+        "Task Scheduler collection",
+    );
+    assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    assert_eq!(result.jobs.len(), 2);
+    assert_eq!(value(&result.jobs[0].scope), &JobScope::User);
+    assert_eq!(value(&result.jobs[1].scope), &JobScope::System);
+    assert_ne!(result.jobs[0].id, result.jobs[1].id);
+
+    windows::enrich_runtime_json(
+        &mut result.jobs,
+        &fixture("windows/runtime.json"),
+        "Task Scheduler runtime query",
+    )
+    .expect("valid invariant runtime JSON");
+
+    assert_eq!(
+        value(&result.jobs[0].last_outcome).state,
+        OutcomeState::Success
+    );
+    assert_eq!(
+        value(&result.jobs[1].last_outcome).state,
+        OutcomeState::Failed
+    );
+    assert!(DateTime::parse_from_rfc3339(&value(&result.jobs[0].next_run).iso8601).is_ok());
+}
+
+#[test]
+fn windows_parser_accepts_actual_utf16_bytes() {
+    let bytes = fixture_bytes("windows/multiple-tasks.xml");
+    assert!(matches!(&bytes[..2], [0xff, 0xfe] | [0xfe, 0xff]));
+
+    let result = windows::parse_task_xml_collection(&bytes, "UTF-16 fixture");
+    assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    assert_eq!(result.jobs.len(), 2);
+}
+
+#[test]
+fn every_platform_fixture_reaches_fault_and_visibility_diagnostics() {
+    let jobs = vec![
+        launchd::parse_plist(
+            fixture("macos/launchd-backup.plist").as_bytes(),
+            "launchd category fixture",
+            JobScope::User,
+        )
+        .expect("launchd fixture"),
+        cron::parse_crontab(
+            &fixture("linux/cron/user.crontab"),
+            "cron category fixture",
+            JobScope::User,
+            Some("fixture-user"),
+            false,
+        )
+        .jobs
+        .remove(0),
+        systemd::parse_timer_show(
+            &fixture("linux/systemd/backup.timer.show"),
+            JobScope::System,
+        )
+        .expect("systemd fixture"),
+        windows::parse_task_xml(
+            fixture("windows/backup-task.xml").as_bytes(),
+            "Windows category fixture",
+        )
+        .expect("Windows fixture"),
+    ];
+
+    for (index, mut job) in jobs.into_iter().enumerate() {
+        job.executable = available_like(format!("/fixture/missing-{index}"), &job.executable);
+        job.arguments = available_like(Vec::new(), &job.arguments);
+        job.enabled = available_like(EnabledState::Disabled, &job.enabled);
+        let mut duplicate = job.clone();
+        duplicate.id = format!("duplicate_{index}");
+        let scheduler = *value(&job.scheduler);
+        let scope = *value(&job.scope);
+        let warnings = [ParseWarning {
+            code: "fixture.malformed".into(),
+            message: "Malformed platform category fixture".into(),
+            source_reference: format!("fixture:{scheduler:?}"),
+        }];
+        let visibility = [Visibility {
+            scheduler,
+            scope,
+            status: VisibilityStatus::PermissionLimited,
+            explanation: "Permission-limited platform category fixture".into(),
+        }];
+        let findings = diagnose(
+            &[job, duplicate],
+            &warnings,
+            &visibility,
+            Utc::now(),
+            |_| false,
+            |_| true,
+        );
+        let codes = findings
+            .iter()
+            .map(|finding| finding.code.as_str())
+            .collect::<Vec<_>>();
+
+        for expected in [
+            "disabledJob",
+            "duplicateCommand",
+            "duplicateIdentifier",
+            "likelyOverlap",
+            "malformedDefinition",
+            "missingExecutable",
+            "permissionLimited",
+        ] {
+            assert!(
+                codes.contains(&expected),
+                "{scheduler:?} fixture missed {expected}: {codes:?}"
+            );
+        }
+    }
 }

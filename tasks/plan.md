@@ -21,7 +21,7 @@ Native source contracts
 - Tauri 2 WebView with custom read-only commands only. See ADR-0001.
 - Conditional native adapters using fixed read-only operations. See ADR-0002.
 - Provenance-rich model with environment values excluded at ingestion. See ADR-0003.
-- Static GitHub Pages documentation from `/docs`; no server or account system.
+- Static GitHub Pages documentation from `site/`; no server or account system.
 
 ## Task list
 

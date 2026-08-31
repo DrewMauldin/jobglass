@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
@@ -21,6 +21,8 @@ pub enum BoundaryError {
     PathNotAllowed,
     #[error("scheduler source was not a regular file")]
     NotARegularFile,
+    #[error("scheduler source root was not a directory")]
+    NotADirectory,
     #[error("native process exceeded its time limit")]
     ProcessTimeout,
     #[error("native process could not be started: {0}")]
@@ -54,6 +56,9 @@ pub fn read_bounded_file_bytes(
     path: &Path,
     allowed_roots: &[&Path],
 ) -> Result<Vec<u8>, BoundaryError> {
+    for root in allowed_roots {
+        validate_directory_root(root)?;
+    }
     let initial_metadata = std::fs::symlink_metadata(path)
         .map_err(|error| BoundaryError::FileRead(error.to_string()))?;
     if initial_metadata.file_type().is_symlink() {
@@ -91,6 +96,78 @@ pub fn read_bounded_file_bytes(
         .map_err(|error| BoundaryError::FileRead(error.to_string()))?;
     validate_bounded_bytes(&bytes)?;
     Ok(bytes)
+}
+
+pub fn validate_directory_root(root: &Path) -> Result<(), BoundaryError> {
+    let metadata = std::fs::symlink_metadata(root)
+        .map_err(|error| BoundaryError::FileRead(error.to_string()))?;
+    if metadata.file_type().is_symlink() {
+        return Err(BoundaryError::SymlinkRejected);
+    }
+    if !metadata.is_dir() {
+        return Err(BoundaryError::NotADirectory);
+    }
+    Ok(())
+}
+
+pub fn local_executable_exists(value: &str) -> bool {
+    let Some(metadata) = safe_local_metadata(value) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+pub fn local_directory_exists(value: &str) -> bool {
+    safe_local_metadata(value).is_some_and(|metadata| metadata.is_dir())
+}
+
+fn safe_local_metadata(value: &str) -> Option<std::fs::Metadata> {
+    if value.is_empty() || value.len() > 32_768 || value.contains('\0') {
+        return None;
+    }
+    let path = Path::new(value);
+    if !path.is_absolute() || is_network_location(path, value) {
+        return None;
+    }
+    let mut current = PathBuf::new();
+    let mut final_metadata = None;
+    for component in path.components() {
+        current.push(component.as_os_str());
+        let metadata = std::fs::symlink_metadata(&current).ok()?;
+        if metadata.file_type().is_symlink() {
+            return None;
+        }
+        final_metadata = Some(metadata);
+    }
+    final_metadata
+}
+
+fn is_network_location(path: &Path, value: &str) -> bool {
+    if value.starts_with("//") || value.starts_with("\\\\") {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        ["/Volumes", "/Network", "/net", "/mnt", "/media"]
+            .iter()
+            .any(|root| path.starts_with(root))
+            || path.starts_with("/run/user") && value.contains("/gvfs/")
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
 
 fn enforce_input_size(size: u64) -> Result<(), BoundaryError> {

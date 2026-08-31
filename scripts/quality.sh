@@ -29,6 +29,7 @@ if [ "$mode" = task ]; then
 fi
 
 npm run test:coverage
+npm run coverage:changed -- origin/main
 npm run test:e2e
 npm run size
 npm audit --audit-level=high

@@ -19,11 +19,15 @@ Merge through a reviewed pull request without force-pushing `main`. Re-read the 
 The tag workflow:
 
 - verifies tag/manifests parity;
+- requires an annotated tag whose commit is reachable from `origin/main`;
+- reruns frontend, browser, Rust, coverage, audit, secret, workflow, and benchmark gates;
 - retests and builds unsigned macOS, Linux, and Windows packages;
 - creates a CycloneDX SBOM and SHA-256 checksums;
 - records GitHub build provenance;
 - creates a draft release, re-downloads all assets, and verifies checksums;
 - publishes only after verification succeeds.
+
+The workflow may replace assets only while a release remains a draft. It fails rather than mutate an already published release.
 
 If a mutation times out, inspect the exact tag, release, and assets before retrying. Never assume an unknown remote response did or did not commit.
 

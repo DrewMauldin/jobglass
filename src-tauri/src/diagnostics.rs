@@ -48,7 +48,8 @@ pub fn diagnose(
     warnings: &[ParseWarning],
     visibility: &[Visibility],
     now: DateTime<Utc>,
-    path_exists: impl Fn(&str) -> bool,
+    executable_exists: impl Fn(&str) -> bool,
+    directory_exists: impl Fn(&str) -> bool,
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
     add_group_findings(
@@ -101,7 +102,7 @@ pub fn diagnose(
     for job in jobs {
         if let Some(executable) = available(&job.executable)
             && is_path(executable)
-            && !path_exists(executable)
+            && !executable_exists(executable)
         {
             findings.push(finding(
                 "missingExecutable",
@@ -113,7 +114,7 @@ pub fn diagnose(
             ));
         }
         if let Some(directory) = available(&job.working_directory)
-            && !path_exists(directory)
+            && !directory_exists(directory)
         {
             findings.push(finding(
                 "invalidWorkingDirectory",

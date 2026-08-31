@@ -13,12 +13,24 @@ export function renderBrowserExport(
         ? job.arguments
         : { ...job.arguments, value: ["<redacted>"] },
   }));
+  const argumentsToRedact = policy.includeArguments
+    ? []
+    : bundle.jobs.flatMap((job) =>
+        job.arguments.availability === "available"
+          ? job.arguments.value.filter(Boolean)
+          : [],
+      );
+  const findings = bundle.findings.map((finding) => ({
+    ...finding,
+    evidence: finding.evidence.map((item) =>
+      argumentsToRedact.reduce(
+        (redacted, argument) => redacted.replaceAll(argument, "<redacted>"),
+        item,
+      ),
+    ),
+  }));
   if (format === "json")
-    return JSON.stringify(
-      { schemaVersion: "1.0", jobs, findings: bundle.findings },
-      null,
-      2,
-    );
+    return JSON.stringify({ schemaVersion: "1.0", jobs, findings }, null, 2);
   if (format === "csv") {
     const rows = jobs.map((job) => {
       const findingCount = bundle.findings.filter((finding) =>
@@ -74,7 +86,8 @@ function unavailableReasonLabel(reason: string): string {
 }
 
 function csvEscape(value: string): string {
-  return `"${value.replaceAll('"', '""')}"`;
+  const safe = /^[\t\r ]*[=+@-]/.test(value) ? `'${value}` : value;
+  return `"${safe.replaceAll('"', '""')}"`;
 }
 
 function htmlEscape(value: string): string {

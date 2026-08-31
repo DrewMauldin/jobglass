@@ -61,8 +61,16 @@ fn diagnostics_are_deterministic_and_cover_seeded_faults() {
         &visibility,
         now,
         |_| false,
+        |_| false,
     );
-    let repeated = diagnose(&[first, second], &warnings, &visibility, now, |_| false);
+    let repeated = diagnose(
+        &[first, second],
+        &warnings,
+        &visibility,
+        now,
+        |_| false,
+        |_| false,
+    );
     let codes = findings
         .iter()
         .map(|finding| finding.code.as_str())
@@ -82,6 +90,26 @@ fn diagnostics_are_deterministic_and_cover_seeded_faults() {
     ] {
         assert!(codes.contains(&expected), "missing finding {expected}");
     }
+}
+
+#[test]
+fn malformed_definition_findings_have_unique_stable_ids() {
+    let warnings = vec![
+        ParseWarning {
+            code: "cron.malformedLine".into(),
+            message: "line 1 is malformed".into(),
+            source_reference: "fixture:1".into(),
+        },
+        ParseWarning {
+            code: "cron.malformedLine".into(),
+            message: "line 2 is malformed".into(),
+            source_reference: "fixture:2".into(),
+        },
+    ];
+    let findings = diagnose(&[], &warnings, &[], Utc::now(), |_| true, |_| true);
+
+    assert_eq!(findings.len(), 2);
+    assert_ne!(findings[0].id, findings[1].id);
 }
 
 #[test]
@@ -114,6 +142,61 @@ fn exports_require_review_redact_arguments_and_escape_html() {
     assert!(html.contains("&lt;/script&gt;&lt;img"));
     assert!(!html.contains("<img src=x"));
     assert!(html.contains("Content-Security-Policy"));
+}
+
+#[test]
+fn default_export_redacts_arguments_repeated_in_finding_evidence() {
+    let result = cron::parse_crontab(
+        "0 1 * * * /usr/bin/backup --token fixture-secret\n0 2 * * * /usr/bin/backup --token fixture-secret\n",
+        "sensitive fixture",
+        JobScope::User,
+        Some("fixture-user"),
+        false,
+    );
+    let findings = diagnose(&result.jobs, &[], &[], Utc::now(), |_| true, |_| true);
+    let redacted = export_json(
+        &result.jobs,
+        &findings,
+        ExportPolicy {
+            reviewed: true,
+            include_arguments: false,
+        },
+    )
+    .expect("redacted export");
+    let included = export_json(
+        &result.jobs,
+        &findings,
+        ExportPolicy {
+            reviewed: true,
+            include_arguments: true,
+        },
+    )
+    .expect("reviewed argument export");
+
+    assert!(!redacted.contains("fixture-secret"));
+    assert!(included.contains("fixture-secret"));
+}
+
+#[test]
+fn csv_export_neutralises_spreadsheet_formulas() {
+    let mut job = windows::parse_task_xml(
+        fixture("windows/backup-task.xml").as_bytes(),
+        "fixture task",
+    )
+    .expect("Windows fixture");
+    job.display_name = available("=2+2".into(), &job.display_name);
+
+    let csv = export_csv(
+        &[job],
+        &[],
+        ExportPolicy {
+            reviewed: true,
+            include_arguments: false,
+        },
+    )
+    .expect("reviewed CSV export");
+
+    assert!(csv.contains("\"'=2+2\""));
 }
 
 #[test]
@@ -164,7 +247,7 @@ fn mixed_platform_bundle_reaches_diagnostics_and_export() {
     )
     .expect("systemd fixture");
     let jobs = vec![launchd_job, cron_job, systemd_job, windows_job];
-    let findings = diagnose(&jobs, &[], &[], Utc::now(), |_| true);
+    let findings = diagnose(&jobs, &[], &[], Utc::now(), |_| true, |_| true);
     let export = export_json(
         &jobs,
         &findings,

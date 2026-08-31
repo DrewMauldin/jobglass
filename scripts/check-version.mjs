@@ -5,6 +5,7 @@ const tauriManifest = JSON.parse(
   await readFile("src-tauri/tauri.conf.json", "utf8"),
 );
 const cargoManifest = await readFile("src-tauri/Cargo.toml", "utf8");
+const changelog = await readFile("CHANGELOG.md", "utf8");
 const cargoVersion = cargoManifest.match(/^version = "([^"]+)"$/mu)?.[1];
 const versions = [packageManifest.version, tauriManifest.version, cargoVersion];
 
@@ -20,6 +21,9 @@ if (expectedTag && expectedTag !== `v${versions[0]}`) {
   throw new Error(
     `tag ${expectedTag} does not match product version v${versions[0]}`,
   );
+}
+if (!changelog.includes(`## [${versions[0]}]`)) {
+  throw new Error(`CHANGELOG.md has no release heading for ${versions[0]}`);
 }
 
 console.log(`version contract: v${versions[0]}`);

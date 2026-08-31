@@ -10,7 +10,7 @@ Download the package and `SHA256SUMS` from the same [GitHub release](https://git
 
 ```bash
 shasum -a 256 PATH_TO_PACKAGE
-grep 'PATH_TO_PACKAGE$' SHA256SUMS
+grep '  PATH_TO_PACKAGE$' SHA256SUMS
 ```
 
 Compare the two complete hexadecimal values. If you download every release asset with `gh release download v0.1.0 --repo DrewMauldin/jobglass`, you can instead run `shasum -a 256 --check SHA256SUMS`. You can also verify GitHub's build attestation with a current GitHub CLI:

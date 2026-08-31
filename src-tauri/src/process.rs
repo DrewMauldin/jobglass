@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
@@ -19,13 +20,13 @@ pub enum NativeTool {
 }
 
 impl NativeTool {
-    fn program(self) -> &'static str {
+    pub(crate) fn program(self) -> Result<PathBuf, BoundaryError> {
         match self {
-            Self::Launchctl => "/bin/launchctl",
-            Self::Crontab => "crontab",
-            Self::Systemctl => "systemctl",
-            Self::Schtasks => "schtasks.exe",
-            Self::PowerShell => "powershell.exe",
+            Self::Launchctl => Ok(PathBuf::from("/bin/launchctl")),
+            Self::Crontab => Ok(PathBuf::from("/usr/bin/crontab")),
+            Self::Systemctl => Ok(PathBuf::from("/usr/bin/systemctl")),
+            Self::Schtasks => windows_system_tool("schtasks.exe"),
+            Self::PowerShell => windows_system_tool("WindowsPowerShell/v1.0/powershell.exe"),
         }
     }
 }
@@ -42,16 +43,23 @@ pub fn run_native_tool(
     arguments: &[&str],
     timeout: Duration,
 ) -> Result<NativeOutput, BoundaryError> {
-    run_program(tool.program(), arguments, timeout)
+    let environment = match tool {
+        NativeTool::Systemctl => &[("LC_ALL", "C"), ("TZ", "UTC")][..],
+        NativeTool::Crontab => &[("LC_ALL", "C")][..],
+        _ => &[][..],
+    };
+    run_program(&tool.program()?, arguments, timeout, environment)
 }
 
 fn run_program(
-    program: &str,
+    program: &Path,
     arguments: &[&str],
     timeout: Duration,
+    environment: &[(&str, &str)],
 ) -> Result<NativeOutput, BoundaryError> {
     let mut child = Command::new(program)
         .args(arguments)
+        .envs(environment.iter().copied())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -93,9 +101,62 @@ fn run_program(
 
     Ok(NativeOutput {
         exit_code: status.code(),
-        stdout: String::from_utf8(stdout).map_err(|_| BoundaryError::InvalidEncoding)?,
-        stderr: String::from_utf8(stderr).map_err(|_| BoundaryError::InvalidEncoding)?,
+        stdout: decode_native_output(stdout)?,
+        stderr: decode_native_output(stderr)?,
     })
+}
+
+fn decode_native_output(bytes: Vec<u8>) -> Result<String, BoundaryError> {
+    if bytes.starts_with(&[0xff, 0xfe]) {
+        return decode_utf16(&bytes[2..], u16::from_le_bytes);
+    }
+    if bytes.starts_with(&[0xfe, 0xff]) {
+        return decode_utf16(&bytes[2..], u16::from_be_bytes);
+    }
+    let looks_utf16le = bytes.len() >= 4
+        && bytes.len().is_multiple_of(2)
+        && bytes
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .take(32)
+            .any(|byte| *byte == 0);
+    if looks_utf16le {
+        return decode_utf16(&bytes, u16::from_le_bytes);
+    }
+    String::from_utf8(bytes).map_err(|_| BoundaryError::InvalidEncoding)
+}
+
+fn decode_utf16(bytes: &[u8], decode: impl Fn([u8; 2]) -> u16) -> Result<String, BoundaryError> {
+    if !bytes.len().is_multiple_of(2) {
+        return Err(BoundaryError::InvalidEncoding);
+    }
+    let units = bytes.as_chunks::<2>().0.iter().map(|pair| decode(*pair));
+    char::decode_utf16(units)
+        .collect::<Result<String, _>>()
+        .map_err(|_| BoundaryError::InvalidEncoding)
+}
+
+#[cfg(windows)]
+fn windows_system_tool(relative: &str) -> Result<PathBuf, BoundaryError> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+
+    use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
+
+    let mut buffer = vec![0_u16; 32_768];
+    let length = unsafe { GetSystemDirectoryW(buffer.as_mut_ptr(), buffer.len() as u32) } as usize;
+    if length == 0 || length >= buffer.len() {
+        return Err(BoundaryError::ProcessSpawn(
+            "Windows system directory was unavailable".into(),
+        ));
+    }
+    Ok(PathBuf::from(OsString::from_wide(&buffer[..length])).join(relative))
+}
+
+#[cfg(not(windows))]
+fn windows_system_tool(relative: &str) -> Result<PathBuf, BoundaryError> {
+    Ok(PathBuf::from("/Windows/System32").join(relative))
 }
 
 fn read_capped(mut stream: impl Read) -> std::io::Result<Vec<u8>> {
@@ -122,5 +183,10 @@ pub(crate) fn run_program_for_test(
     arguments: &[&str],
     timeout: Duration,
 ) -> Result<NativeOutput, BoundaryError> {
-    run_program(program, arguments, timeout)
+    run_program(Path::new(program), arguments, timeout, &[])
+}
+
+#[cfg(test)]
+pub(crate) fn decode_native_output_for_test(bytes: Vec<u8>) -> Result<String, BoundaryError> {
+    decode_native_output(bytes)
 }

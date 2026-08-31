@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import axe from "axe-core";
 
 interface AxeWindow extends Window {
@@ -11,6 +11,19 @@ interface AxeWindow extends Window {
 
 interface MetricsWindow extends Window {
   jobglassLongTasks: number[];
+}
+
+async function expectNoLongTasks(page: Page, operation: string) {
+  await page.waitForTimeout(100);
+  const longTasks = await page.evaluate(
+    () => (window as unknown as MetricsWindow).jobglassLongTasks,
+  );
+  expect(longTasks, `${operation} exceeded the 50 ms long-task budget`).toEqual(
+    [],
+  );
+  await page.evaluate(() => {
+    (window as unknown as MetricsWindow).jobglassLongTasks = [];
+  });
 }
 
 test("is keyboard-operable, responsive, and free of serious axe findings", async ({
@@ -52,6 +65,13 @@ test("is keyboard-operable, responsive, and free of serious axe findings", async
   await expect(
     page.getByRole("button", { name: "Close export review" }),
   ).toBeFocused();
+  const dialogViolations = await page.evaluate(async () => {
+    const result = await (window as unknown as AxeWindow).axe.run();
+    return result.violations.filter(
+      ({ impact }) => impact === "serious" || impact === "critical",
+    );
+  });
+  expect(dialogViolations).toEqual([]);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(
@@ -86,14 +106,26 @@ test("keeps 5,000-job interactions below the long-task budget", async ({
     (window as unknown as MetricsWindow).jobglassLongTasks = [];
   });
 
+  await page.getByRole("button", { name: "Timeline" }).click();
+  await expect(page.getByRole("button", { name: "Timeline" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expectNoLongTasks(page, "timeline view");
+  await page.getByRole("button", { name: "List" }).click();
+  await expectNoLongTasks(page, "list view");
+  await page.getByRole("button", { name: "Export report" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Review before exporting" }),
+  ).toBeVisible();
+  await expectNoLongTasks(page, "export dialog open");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expectNoLongTasks(page, "export dialog close");
+
   await page
     .getByRole("searchbox", { name: "Search jobs" })
     .fill("Fixture job 05000");
   await expect(page.getByText("1 job", { exact: true })).toBeVisible();
-  await page.waitForTimeout(100);
-
-  const longTasks = await page.evaluate(
-    () => (window as unknown as MetricsWindow).jobglassLongTasks,
-  );
-  expect(longTasks).toEqual([]);
+  await expectNoLongTasks(page, "search");
 });

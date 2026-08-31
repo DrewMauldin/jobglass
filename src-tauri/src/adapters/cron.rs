@@ -94,7 +94,7 @@ pub fn parse_crontab(
             None => result.warnings.push(warning(
                 "cron.malformedLine",
                 format!("line {line_number} is not a recognised cron entry"),
-                source,
+                &format!("{source}:{line_number}"),
             )),
         }
     }
@@ -134,11 +134,10 @@ fn parse_job_line(line: &str, has_owner_column: bool) -> Option<(String, Option<
     if fields.len() <= schedule_fields + owner_fields {
         return None;
     }
-    if schedule_fields == 5
-        && fields[..5]
-            .iter()
-            .any(|field| !looks_like_schedule_field(field))
-    {
+    if schedule_fields == 1 && !valid_nickname(fields[0]) {
+        return None;
+    }
+    if schedule_fields == 5 && !valid_calendar_fields(&fields[..5]) {
         return None;
     }
     let schedule = fields[..schedule_fields].join(" ");
@@ -147,10 +146,75 @@ fn parse_job_line(line: &str, has_owner_column: bool) -> Option<(String, Option<
     Some((schedule, owner, command))
 }
 
-fn looks_like_schedule_field(field: &str) -> bool {
-    field
-        .chars()
-        .all(|character| character.is_ascii_alphanumeric() || "*,-/?:#LW".contains(character))
+fn valid_nickname(value: &str) -> bool {
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "@reboot"
+            | "@yearly"
+            | "@annually"
+            | "@monthly"
+            | "@weekly"
+            | "@daily"
+            | "@midnight"
+            | "@hourly"
+    )
+}
+
+fn valid_calendar_fields(fields: &[&str]) -> bool {
+    let specifications = [
+        (0, 59, &[][..]),
+        (0, 23, &[][..]),
+        (1, 31, &[][..]),
+        (
+            1,
+            12,
+            &[
+                "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+            ][..],
+        ),
+        (0, 7, &["sun", "mon", "tue", "wed", "thu", "fri", "sat"][..]),
+    ];
+    fields
+        .iter()
+        .zip(specifications)
+        .all(|(field, (minimum, maximum, names))| {
+            valid_calendar_field(field, minimum, maximum, names)
+        })
+}
+
+fn valid_calendar_field(field: &str, minimum: u8, maximum: u8, names: &[&str]) -> bool {
+    !field.is_empty()
+        && field.split(',').all(|item| {
+            let (base, step) = item
+                .split_once('/')
+                .map_or((item, None), |(base, step)| (base, Some(step)));
+            if step.is_some_and(|value| value.parse::<u16>().ok().is_none_or(|step| step == 0)) {
+                return false;
+            }
+            if base == "*" {
+                return true;
+            }
+            if let Some((start, end)) = base.split_once('-') {
+                let Some(start) = calendar_value(start, minimum, maximum, names) else {
+                    return false;
+                };
+                let Some(end) = calendar_value(end, minimum, maximum, names) else {
+                    return false;
+                };
+                return start <= end;
+            }
+            calendar_value(base, minimum, maximum, names).is_some()
+        })
+}
+
+fn calendar_value(value: &str, minimum: u8, maximum: u8, names: &[&str]) -> Option<u8> {
+    if let Ok(number) = value.parse::<u8>() {
+        return (minimum..=maximum).contains(&number).then_some(number);
+    }
+    names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(value))
+        .map(|index| minimum + index as u8)
 }
 
 fn environment_assignment_key(line: &str) -> Option<&str> {

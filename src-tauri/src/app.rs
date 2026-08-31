@@ -1,11 +1,10 @@
-use std::path::Path;
-
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::diagnostics::{Finding, Visibility, diagnose};
 use crate::export::{ExportPolicy, export_csv, export_html, export_json};
+use crate::input::{local_directory_exists, local_executable_exists};
 use crate::model::{ParseWarning, ScheduledJob};
 
 #[derive(Debug, Clone, Serialize)]
@@ -65,9 +64,14 @@ fn bundle(
 ) -> ScanBundle {
     let generated_at = Utc::now();
     let diagnostics_started = std::time::Instant::now();
-    let findings = diagnose(&jobs, &warnings, &visibility, generated_at, |path| {
-        Path::new(path).exists()
-    });
+    let findings = diagnose(
+        &jobs,
+        &warnings,
+        &visibility,
+        generated_at,
+        local_executable_exists,
+        local_directory_exists,
+    );
     let diagnostics_ms = diagnostics_started.elapsed().as_secs_f64() * 1_000.0;
     eprintln!(
         "{{\"event\":\"scan.complete\",\"platform\":\"{platform}\",\"jobs\":{},\"warnings\":{},\"findings\":{},\"diagnosticsMs\":{diagnostics_ms:.1}}}",
@@ -117,7 +121,7 @@ mod macos {
     use crate::adapters::warning;
     use crate::app::{ScanBundle, bundle};
     use crate::diagnostics::{Visibility, VisibilityStatus};
-    use crate::input::{MAX_JOBS, read_bounded_file_bytes};
+    use crate::input::{MAX_JOBS, read_bounded_file_bytes, validate_directory_root};
     use crate::model::{JobScope, ParseWarning, ScheduledJob, SchedulerKind};
     use crate::process::{NativeTool, run_native_tool};
 
@@ -215,6 +219,14 @@ mod macos {
         if !root.exists() {
             return false;
         }
+        if let Err(error) = validate_directory_root(root) {
+            warnings.push(warning(
+                "launchd.directory",
+                error.to_string(),
+                &root.display().to_string(),
+            ));
+            return true;
+        }
         let entries = match std::fs::read_dir(root) {
             Ok(entries) => entries,
             Err(error) => {
@@ -285,16 +297,17 @@ mod macos {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 mod linux {
+    use std::io::ErrorKind;
     use std::path::Path;
     use std::time::Duration;
 
-    use crate::adapters::{cron, systemd, warning};
+    use crate::adapters::{AdapterResult, cron, systemd, warning};
     use crate::app::{ScanBundle, bundle};
     use crate::diagnostics::{Visibility, VisibilityStatus};
-    use crate::input::read_bounded_file;
-    use crate::model::{JobScope, SchedulerKind};
+    use crate::input::{MAX_JOBS, read_bounded_file, validate_directory_root};
+    use crate::model::{JobScope, ParseWarning, ScheduledJob, SchedulerKind};
     use crate::process::{NativeTool, run_native_tool};
 
     pub(super) fn scan() -> ScanBundle {
@@ -310,18 +323,16 @@ mod linux {
                     None,
                     false,
                 );
-                jobs.extend(result.jobs);
-                warnings.extend(result.warnings);
+                append_result(&mut jobs, &mut warnings, result, "user crontab");
                 visibility.push(visible(SchedulerKind::Cron, JobScope::User));
             }
-            Ok(output) => visibility.push(limited(
+            Ok(output) if output.stderr.to_ascii_lowercase().contains("no crontab") => {
+                visibility.push(visible(SchedulerKind::Cron, JobScope::User));
+            }
+            Ok(_) => visibility.push(limited(
                 SchedulerKind::Cron,
                 JobScope::User,
-                if output.stderr.is_empty() {
-                    "The user crontab was unavailable."
-                } else {
-                    "The user crontab could not be read."
-                },
+                "The user crontab could not be read.",
             )),
             Err(error) => {
                 warnings.push(warning("cron.command", error.to_string(), "crontab -l"));
@@ -332,78 +343,383 @@ mod linux {
                 ));
             }
         }
-        let root = Path::new("/etc");
-        if let Ok(contents) = read_bounded_file(Path::new("/etc/crontab"), &[root]) {
-            let result =
-                cron::parse_crontab(&contents, "/etc/crontab", JobScope::System, None, true);
-            jobs.extend(result.jobs);
-            warnings.extend(result.warnings);
+        let (system_cron_seen, system_cron_limited) =
+            scan_system_cron(Path::new("/etc"), &mut jobs, &mut warnings);
+        if system_cron_seen && !system_cron_limited {
             visibility.push(visible(SchedulerKind::Cron, JobScope::System));
-        } else {
+        } else if system_cron_seen {
             visibility.push(limited(
                 SchedulerKind::Cron,
                 JobScope::System,
-                "The system crontab was missing or unreadable without elevation.",
+                "One or more system cron sources were unreadable without elevation.",
+            ));
+        } else {
+            visibility.push(unavailable(
+                SchedulerKind::Cron,
+                JobScope::System,
+                "No supported system cron source was present.",
             ));
         }
         for user_scope in [false, true] {
-            let mut arguments = vec!["list-unit-files", "--type=timer", "--no-legend", "--plain"];
-            if user_scope {
-                arguments.insert(0, "--user");
-            }
-            if let Ok(list) =
-                run_native_tool(NativeTool::Systemctl, &arguments, Duration::from_secs(3))
-            {
-                for identifier in list
-                    .stdout
-                    .lines()
-                    .filter_map(|line| line.split_whitespace().next())
-                {
-                    let mut show_arguments = vec!["show", identifier, "--no-pager"];
-                    if user_scope {
-                        show_arguments.insert(0, "--user");
-                    }
-                    if let Ok(show) = run_native_tool(
-                        NativeTool::Systemctl,
-                        &show_arguments,
-                        Duration::from_secs(2),
-                    ) && show.exit_code == Some(0)
-                    {
-                        match systemd::parse_timer_show(
-                            &show.stdout,
-                            if user_scope {
-                                JobScope::User
-                            } else {
-                                JobScope::System
-                            },
-                        ) {
-                            Ok(job) => jobs.push(job),
-                            Err(parse_warning) => warnings.push(parse_warning),
-                        }
-                    }
-                }
-                visibility.push(visible(
-                    SchedulerKind::Systemd,
-                    if user_scope {
-                        JobScope::User
-                    } else {
-                        JobScope::System
-                    },
-                ));
-            } else {
-                visibility.push(limited(
-                    SchedulerKind::Systemd,
-                    if user_scope {
-                        JobScope::User
-                    } else {
-                        JobScope::System
-                    },
-                    "The systemd manager was unavailable or permission-limited.",
-                ));
-            }
+            visibility.push(scan_systemd_scope(user_scope, &mut jobs, &mut warnings));
         }
         jobs.sort_by(|left, right| left.id.cmp(&right.id));
         bundle("Linux cron and systemd", jobs, warnings, visibility)
+    }
+
+    fn scan_system_cron(
+        root: &Path,
+        jobs: &mut Vec<ScheduledJob>,
+        warnings: &mut Vec<ParseWarning>,
+    ) -> (bool, bool) {
+        let mut seen = false;
+        let mut limited = false;
+        let crontab = root.join("crontab");
+        match read_optional_cron_file(&crontab, root, true, jobs, warnings) {
+            SourceState::Read => seen = true,
+            SourceState::Missing => {}
+            SourceState::Limited => {
+                seen = true;
+                limited = true;
+            }
+        }
+        let cron_d = root.join("cron.d");
+        match scan_cron_directory(&cron_d, jobs, warnings) {
+            SourceState::Read => seen = true,
+            SourceState::Missing => {}
+            SourceState::Limited => {
+                seen = true;
+                limited = true;
+            }
+        }
+        for period in ["hourly", "daily", "weekly", "monthly"] {
+            let directory = root.join(format!("cron.{period}"));
+            match scan_periodic_directory(&directory, period, jobs, warnings) {
+                SourceState::Read => seen = true,
+                SourceState::Missing => {}
+                SourceState::Limited => {
+                    seen = true;
+                    limited = true;
+                }
+            }
+        }
+        (seen, limited)
+    }
+
+    #[derive(Clone, Copy)]
+    enum SourceState {
+        Read,
+        Missing,
+        Limited,
+    }
+
+    fn read_optional_cron_file(
+        path: &Path,
+        allowed_root: &Path,
+        has_owner_column: bool,
+        jobs: &mut Vec<ScheduledJob>,
+        warnings: &mut Vec<ParseWarning>,
+    ) -> SourceState {
+        match read_bounded_file(path, &[allowed_root]) {
+            Ok(contents) => {
+                let source = path.display().to_string();
+                append_result(
+                    jobs,
+                    warnings,
+                    cron::parse_crontab(
+                        &contents,
+                        &source,
+                        JobScope::System,
+                        None,
+                        has_owner_column,
+                    ),
+                    &source,
+                );
+                SourceState::Read
+            }
+            Err(_) if !path.exists() => SourceState::Missing,
+            Err(error) => {
+                warnings.push(warning(
+                    "cron.read",
+                    error.to_string(),
+                    &path.display().to_string(),
+                ));
+                SourceState::Limited
+            }
+        }
+    }
+
+    fn scan_cron_directory(
+        root: &Path,
+        jobs: &mut Vec<ScheduledJob>,
+        warnings: &mut Vec<ParseWarning>,
+    ) -> SourceState {
+        let entries = match directory_entries(root, warnings) {
+            Ok(Some(entries)) => entries,
+            Ok(None) => return SourceState::Missing,
+            Err(()) => return SourceState::Limited,
+        };
+        let mut limited = false;
+        for entry in entries {
+            let path = match entry {
+                Ok(entry) => entry.path(),
+                Err(error) => {
+                    warnings.push(warning(
+                        "cron.entry",
+                        error.to_string(),
+                        &root.display().to_string(),
+                    ));
+                    limited = true;
+                    continue;
+                }
+            };
+            match read_optional_cron_file(&path, root, true, jobs, warnings) {
+                SourceState::Read | SourceState::Missing => {}
+                SourceState::Limited => limited = true,
+            }
+            if jobs.len() >= MAX_JOBS {
+                limited = true;
+                break;
+            }
+        }
+        if limited {
+            SourceState::Limited
+        } else {
+            SourceState::Read
+        }
+    }
+
+    fn scan_periodic_directory(
+        root: &Path,
+        period: &str,
+        jobs: &mut Vec<ScheduledJob>,
+        warnings: &mut Vec<ParseWarning>,
+    ) -> SourceState {
+        use std::os::unix::fs::PermissionsExt;
+
+        let entries = match directory_entries(root, warnings) {
+            Ok(Some(entries)) => entries,
+            Ok(None) => return SourceState::Missing,
+            Err(()) => return SourceState::Limited,
+        };
+        let mut limited = false;
+        for entry in entries {
+            if jobs.len() >= MAX_JOBS {
+                push_job_limit_warning(warnings, &root.display().to_string());
+                return SourceState::Limited;
+            }
+            let path = match entry {
+                Ok(entry) => entry.path(),
+                Err(error) => {
+                    warnings.push(warning(
+                        "cron.periodicEntry",
+                        error.to_string(),
+                        &root.display().to_string(),
+                    ));
+                    limited = true;
+                    continue;
+                }
+            };
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                limited = true;
+                continue;
+            };
+            if metadata.file_type().is_symlink() {
+                warnings.push(warning(
+                    "cron.periodicSymlink",
+                    "symbolic link input was rejected",
+                    &path.display().to_string(),
+                ));
+                limited = true;
+                continue;
+            }
+            if metadata.is_file() && metadata.permissions().mode() & 0o111 != 0 {
+                jobs.push(cron::periodic_job(
+                    &path.display().to_string(),
+                    period,
+                    JobScope::System,
+                ));
+            }
+        }
+        if limited {
+            SourceState::Limited
+        } else {
+            SourceState::Read
+        }
+    }
+
+    fn directory_entries(
+        root: &Path,
+        warnings: &mut Vec<ParseWarning>,
+    ) -> Result<Option<std::fs::ReadDir>, ()> {
+        match validate_directory_root(root) {
+            Ok(()) => {}
+            Err(crate::input::BoundaryError::FileRead(message))
+                if std::fs::symlink_metadata(root)
+                    .is_err_and(|error| error.kind() == ErrorKind::NotFound) =>
+            {
+                let _ = message;
+                return Ok(None);
+            }
+            Err(error) => {
+                warnings.push(warning(
+                    "cron.directory",
+                    error.to_string(),
+                    &root.display().to_string(),
+                ));
+                return Err(());
+            }
+        }
+        std::fs::read_dir(root).map(Some).map_err(|error| {
+            warnings.push(warning(
+                "cron.directory",
+                error.to_string(),
+                &root.display().to_string(),
+            ));
+        })
+    }
+
+    fn append_result(
+        jobs: &mut Vec<ScheduledJob>,
+        warnings: &mut Vec<ParseWarning>,
+        result: AdapterResult,
+        source: &str,
+    ) {
+        warnings.extend(result.warnings);
+        let remaining = MAX_JOBS.saturating_sub(jobs.len());
+        let truncated = result.jobs.len() > remaining;
+        jobs.extend(result.jobs.into_iter().take(remaining));
+        if truncated {
+            push_job_limit_warning(warnings, source);
+        }
+    }
+
+    fn push_job_limit_warning(warnings: &mut Vec<ParseWarning>, source: &str) {
+        if !warnings
+            .iter()
+            .any(|warning| warning.code == "scan.jobLimit")
+        {
+            warnings.push(warning(
+                "scan.jobLimit",
+                format!("aggregate job limit of {MAX_JOBS} reached"),
+                source,
+            ));
+        }
+    }
+
+    fn scan_systemd_scope(
+        user_scope: bool,
+        jobs: &mut Vec<ScheduledJob>,
+        warnings: &mut Vec<ParseWarning>,
+    ) -> Visibility {
+        let scope = if user_scope {
+            JobScope::User
+        } else {
+            JobScope::System
+        };
+        let mut arguments = vec!["list-unit-files", "--type=timer", "--no-legend", "--plain"];
+        if user_scope {
+            arguments.insert(0, "--user");
+        }
+        let list = match run_native_tool(NativeTool::Systemctl, &arguments, Duration::from_secs(3))
+        {
+            Ok(list) if list.exit_code == Some(0) => list,
+            Ok(list) => {
+                warnings.push(warning(
+                    "systemd.list",
+                    format!(
+                        "systemctl exited with {:?}: {}",
+                        list.exit_code, list.stderr
+                    ),
+                    if user_scope {
+                        "systemctl --user list-unit-files"
+                    } else {
+                        "systemctl list-unit-files"
+                    },
+                ));
+                return limited(
+                    SchedulerKind::Systemd,
+                    scope,
+                    "The systemd manager was unavailable or permission-limited.",
+                );
+            }
+            Err(error) => {
+                warnings.push(warning(
+                    "systemd.list",
+                    error.to_string(),
+                    "systemctl list-unit-files",
+                ));
+                return limited(
+                    SchedulerKind::Systemd,
+                    scope,
+                    "The systemd manager was unavailable or permission-limited.",
+                );
+            }
+        };
+        let mut scan_limited = false;
+        for identifier in list
+            .stdout
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+        {
+            if jobs.len() >= MAX_JOBS {
+                push_job_limit_warning(warnings, "systemctl list-unit-files");
+                scan_limited = true;
+                break;
+            }
+            if !systemd::valid_timer_identifier(identifier) {
+                warnings.push(warning(
+                    "systemd.identifier",
+                    "systemctl returned an invalid timer identifier",
+                    "systemctl list-unit-files",
+                ));
+                scan_limited = true;
+                continue;
+            }
+            let mut show_arguments = vec!["show", "--no-pager", "--", identifier];
+            if user_scope {
+                show_arguments.insert(0, "--user");
+            }
+            match run_native_tool(
+                NativeTool::Systemctl,
+                &show_arguments,
+                Duration::from_secs(2),
+            ) {
+                Ok(show) if show.exit_code == Some(0) => {
+                    match systemd::parse_timer_show(&show.stdout, scope) {
+                        Ok(job) => jobs.push(job),
+                        Err(parse_warning) => {
+                            warnings.push(parse_warning);
+                            scan_limited = true;
+                        }
+                    }
+                }
+                Ok(show) => {
+                    warnings.push(warning(
+                        "systemd.show",
+                        format!(
+                            "systemctl exited with {:?}: {}",
+                            show.exit_code, show.stderr
+                        ),
+                        identifier,
+                    ));
+                    scan_limited = true;
+                }
+                Err(error) => {
+                    warnings.push(warning("systemd.show", error.to_string(), identifier));
+                    scan_limited = true;
+                }
+            }
+        }
+        if scan_limited {
+            limited(
+                SchedulerKind::Systemd,
+                scope,
+                "One or more systemd timer definitions were unavailable or invalid.",
+            )
+        } else {
+            visible(SchedulerKind::Systemd, scope)
+        }
     }
 
     fn visible(scheduler: SchedulerKind, scope: JobScope) -> Visibility {
@@ -423,9 +739,120 @@ mod linux {
             explanation: explanation.into(),
         }
     }
+
+    fn unavailable(scheduler: SchedulerKind, scope: JobScope, explanation: &str) -> Visibility {
+        Visibility {
+            scheduler,
+            scope,
+            status: VisibilityStatus::Unavailable,
+            explanation: explanation.into(),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use std::os::unix::fs::PermissionsExt;
+
+        use super::*;
+        use crate::model::{Evidence, SchedulerKind};
+
+        #[test]
+        fn system_cron_collector_reads_cron_d_and_periodic_directories() {
+            let _compile_complete_linux_scanner: fn() -> ScanBundle = scan;
+            let root = tempfile::tempdir().expect("cron root");
+            std::fs::write(
+                root.path().join("crontab"),
+                "0 2 * * * root /usr/bin/backup\n",
+            )
+            .expect("system crontab");
+            let cron_d = root.path().join("cron.d");
+            std::fs::create_dir(&cron_d).expect("cron.d");
+            std::fs::write(cron_d.join("cleanup"), "0 3 * * * root /usr/bin/cleanup\n")
+                .expect("cron.d file");
+            let daily = root.path().join("cron.daily");
+            std::fs::create_dir(&daily).expect("cron.daily");
+            let periodic = daily.join("rotate");
+            std::fs::write(&periodic, "#!/bin/sh\n").expect("periodic fixture");
+            let mut permissions = std::fs::metadata(&periodic)
+                .expect("periodic metadata")
+                .permissions();
+            permissions.set_mode(0o700);
+            std::fs::set_permissions(&periodic, permissions).expect("periodic permissions");
+
+            let mut jobs = Vec::new();
+            let mut warnings = Vec::new();
+            let (seen, limited) = scan_system_cron(root.path(), &mut jobs, &mut warnings);
+
+            assert!(seen);
+            assert!(!limited, "{warnings:?}");
+            assert_eq!(jobs.len(), 3);
+            assert!(jobs.iter().all(|job| {
+                matches!(
+                    job.scheduler,
+                    Evidence::Available {
+                        value: SchedulerKind::Cron,
+                        ..
+                    }
+                )
+            }));
+        }
+
+        #[test]
+        fn complete_linux_scanner_returns_bounded_visibility_evidence() {
+            let bundle = scan();
+
+            assert_eq!(bundle.platform, "Linux cron and systemd");
+            assert!(bundle.jobs.len() <= MAX_JOBS);
+            assert_eq!(bundle.visibility.len(), 4);
+        }
+
+        #[test]
+        fn aggregate_job_append_never_exceeds_the_global_limit() {
+            let mut jobs = (0..MAX_JOBS - 1)
+                .map(|index| {
+                    ScheduledJob::new(
+                        SchedulerKind::Cron,
+                        format!("existing-{index}"),
+                        "Existing fixture",
+                        JobScope::User,
+                        "fixture",
+                    )
+                })
+                .collect::<Vec<_>>();
+            let incoming = (0..2)
+                .map(|index| {
+                    ScheduledJob::new(
+                        SchedulerKind::Systemd,
+                        format!("incoming-{index}.timer"),
+                        "Incoming fixture",
+                        JobScope::System,
+                        "fixture",
+                    )
+                })
+                .collect();
+            let mut warnings = Vec::new();
+
+            append_result(
+                &mut jobs,
+                &mut warnings,
+                AdapterResult {
+                    jobs: incoming,
+                    warnings: Vec::new(),
+                },
+                "fixture",
+            );
+
+            assert_eq!(jobs.len(), MAX_JOBS);
+            assert!(
+                warnings
+                    .iter()
+                    .any(|warning| warning.code == "scan.jobLimit")
+            );
+        }
+    }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", all(test, unix)))]
 mod windows {
     use std::time::Duration;
 
@@ -438,20 +865,30 @@ mod windows {
     pub(super) fn scan() -> ScanBundle {
         let mut jobs = Vec::new();
         let mut warnings = Vec::new();
-        let (status, explanation) = match run_native_tool(
+        let (mut status, mut explanation) = match run_native_tool(
             NativeTool::Schtasks,
-            &["/query", "/xml", "ONE"],
+            &["/query", "/xml"],
             Duration::from_secs(10),
         ) {
             Ok(output) if output.exit_code == Some(0) => {
-                match windows::parse_task_xml(output.stdout.as_bytes(), "schtasks /query /xml") {
-                    Ok(job) => jobs.push(job),
-                    Err(parse_warning) => warnings.push(parse_warning),
+                let result = windows::parse_task_xml_collection(
+                    output.stdout.as_bytes(),
+                    "schtasks /query /xml",
+                );
+                let complete = result.warnings.is_empty();
+                jobs = result.jobs;
+                warnings.extend(result.warnings);
+                if complete {
+                    (
+                        VisibilityStatus::Complete,
+                        "Task Scheduler returned readable local XML.",
+                    )
+                } else {
+                    (
+                        VisibilityStatus::PermissionLimited,
+                        "One or more Task Scheduler definitions were invalid or unavailable.",
+                    )
                 }
-                (
-                    VisibilityStatus::Complete,
-                    "Task Scheduler returned readable local XML.",
-                )
             }
             Ok(_) => (
                 VisibilityStatus::PermissionLimited,
@@ -465,17 +902,100 @@ mod windows {
                 )
             }
         };
+        if !jobs.is_empty() {
+            match run_native_tool(
+                NativeTool::PowerShell,
+                &[
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    RUNTIME_QUERY,
+                ],
+                Duration::from_secs(15),
+            ) {
+                Ok(output) if output.exit_code == Some(0) => {
+                    if let Err(parse_warning) = windows::enrich_runtime_json(
+                        &mut jobs,
+                        &output.stdout,
+                        "Get-ScheduledTaskInfo local runtime query",
+                    ) {
+                        warnings.push(parse_warning);
+                        status = VisibilityStatus::PermissionLimited;
+                        explanation =
+                            "Task definitions were readable, but runtime evidence was invalid.";
+                    }
+                }
+                Ok(output) => {
+                    warnings.push(warning(
+                        "windows.runtime",
+                        format!(
+                            "runtime query exited with {:?}: {}",
+                            output.exit_code, output.stderr
+                        ),
+                        "Get-ScheduledTaskInfo",
+                    ));
+                    status = VisibilityStatus::PermissionLimited;
+                    explanation =
+                        "Task definitions were readable, but runtime evidence was unavailable.";
+                }
+                Err(error) => {
+                    warnings.push(warning(
+                        "windows.runtime",
+                        error.to_string(),
+                        "Get-ScheduledTaskInfo",
+                    ));
+                    status = VisibilityStatus::PermissionLimited;
+                    explanation =
+                        "Task definitions were readable, but runtime evidence was unavailable.";
+                }
+            }
+        }
+        jobs.sort_by(|left, right| left.id.cmp(&right.id));
         bundle(
             "Windows Task Scheduler",
             jobs,
             warnings,
-            vec![Visibility {
-                scheduler: SchedulerKind::WindowsTaskScheduler,
-                scope: JobScope::User,
-                status,
-                explanation: explanation.into(),
-            }],
+            [JobScope::User, JobScope::System]
+                .into_iter()
+                .map(|scope| Visibility {
+                    scheduler: SchedulerKind::WindowsTaskScheduler,
+                    scope,
+                    status,
+                    explanation: explanation.into(),
+                })
+                .collect(),
         )
+    }
+
+    const RUNTIME_QUERY: &str = r#"$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); function Convert-Iso($value) { if ($null -eq $value -or $value -le [DateTime]::MinValue) { return $null }; return $value.ToUniversalTime().ToString('o',[Globalization.CultureInfo]::InvariantCulture) }; $records=@(Get-ScheduledTask -ErrorAction Stop | ForEach-Object { $task=$_; $info=$task | Get-ScheduledTaskInfo -ErrorAction Stop; [PSCustomObject]@{ identifier=($task.TaskPath+$task.TaskName); nextRunTime=(Convert-Iso $info.NextRunTime); lastRunTime=(Convert-Iso $info.LastRunTime); lastTaskResult=[Int64]$info.LastTaskResult; state=[String]$task.State } }); ConvertTo-Json -InputObject $records -Compress"#;
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn windows_scanner_and_invariant_runtime_query_compile_together() {
+            let _compile_complete_windows_scanner: fn() -> ScanBundle = scan;
+            assert!(RUNTIME_QUERY.contains("ToUniversalTime().ToString('o'"));
+            assert!(!RUNTIME_QUERY.contains("/S "));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn unavailable_windows_tools_produce_explicit_scope_visibility() {
+            let bundle = scan();
+
+            assert_eq!(bundle.platform, "Windows Task Scheduler");
+            assert!(bundle.jobs.is_empty());
+            assert_eq!(bundle.visibility.len(), 2);
+            assert!(bundle.visibility.iter().all(|item| {
+                item.status == VisibilityStatus::Unavailable
+                    && item.scheduler == SchedulerKind::WindowsTaskScheduler
+            }));
+        }
     }
 }
 
