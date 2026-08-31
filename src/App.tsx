@@ -25,6 +25,7 @@ interface AppProps {
 }
 type ViewMode = "list" | "timeline";
 type ThemeMode = "system" | "light" | "dark";
+const PAGE_SIZE = 25;
 
 export function App({
   loader = loadBundle,
@@ -37,7 +38,7 @@ export function App({
   const [query, setQuery] = useState("");
   const [scheduler, setScheduler] = useState<"all" | SchedulerKind>("all");
   const [view, setView] = useState<ViewMode>("list");
-  const [visibleCount, setVisibleCount] = useState(100);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>("system");
   const [showFindings, setShowFindings] = useState(false);
@@ -234,10 +235,10 @@ export function App({
               }}
             />
           )}
-          {!loading && bundle?.jobs.length === 0 && (
+          {!loading && bundle?.jobs.length === 0 && !showFindings && (
             <EmptyState bundle={bundle} />
           )}
-          {!loading && bundle && bundle.jobs.length > 0 && (
+          {!loading && bundle && (bundle.jobs.length > 0 || showFindings) && (
             <>
               <section
                 className="overview-heading"
@@ -277,7 +278,7 @@ export function App({
                           value={query}
                           onChange={(event) => {
                             setQuery(event.target.value);
-                            setVisibleCount(100);
+                            setVisibleCount(PAGE_SIZE);
                           }}
                         />
                       </label>
@@ -289,7 +290,7 @@ export function App({
                             setScheduler(
                               event.target.value as "all" | SchedulerKind,
                             );
-                            setVisibleCount(100);
+                            setVisibleCount(PAGE_SIZE);
                           }}
                         >
                           <option value="all">All schedulers</option>
@@ -368,10 +369,10 @@ export function App({
                         className="load-more"
                         type="button"
                         onClick={() => {
-                          setVisibleCount((count) => count + 100);
+                          setVisibleCount((count) => count + PAGE_SIZE);
                         }}
                       >
-                        Show 100 more jobs
+                        Show {PAGE_SIZE} more jobs
                         <span>
                           Showing {visibleJobs.length} of {filteredJobs.length}
                         </span>

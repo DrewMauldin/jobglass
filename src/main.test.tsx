@@ -265,6 +265,25 @@ describe("JobGlass desktop experience", () => {
     ).toBeVisible();
   });
 
+  it("keeps findings reachable when no jobs were parsed", async () => {
+    const user = userEvent.setup();
+    const finding = demoBundle.findings[0];
+    if (!finding) throw new Error("demo fixture must contain a finding");
+    render(
+      <App
+        loader={() =>
+          Promise.resolve({ ...demoBundle, jobs: [], findings: [finding] })
+        }
+      />,
+    );
+
+    await screen.findByRole("heading", { name: "No scheduled jobs found" });
+    await user.click(screen.getByRole("button", { name: /findings 1/i }));
+    expect(screen.getByRole("heading", { name: "Findings" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: finding.title })).toBeVisible();
+    expect(screen.getByText(finding.evidence[0] ?? "")).toBeVisible();
+  });
+
   it("navigates findings, resets empty filters, and selects a theme", async () => {
     const user = userEvent.setup();
     render(<App loader={loadDemo} />);
@@ -366,13 +385,15 @@ describe("JobGlass desktop experience", () => {
 
     await screen.findByRole("heading", { name: "Scheduled jobs" });
     expect(
-      screen.getByRole("button", { name: /Show 100 more jobs/ }),
-    ).toHaveTextContent("Showing 100 of 101");
-    await user.click(
-      screen.getByRole("button", { name: /Show 100 more jobs/ }),
-    );
+      screen.getByRole("button", { name: /Show 25 more jobs/ }),
+    ).toHaveTextContent("Showing 25 of 101");
+    for (let page = 0; page < 4; page += 1) {
+      await user.click(
+        screen.getByRole("button", { name: /Show 25 more jobs/ }),
+      );
+    }
     expect(
-      screen.queryByRole("button", { name: /Show 100 more jobs/ }),
+      screen.queryByRole("button", { name: /Show 25 more jobs/ }),
     ).toBeNull();
   });
 

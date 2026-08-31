@@ -32,6 +32,13 @@ export default defineConfig({
         viewport: { width: 770, height: 700 },
       },
     },
+    {
+      name: "collapsed-sidebar",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 900, height: 700 },
+      },
+    },
   ],
   webServer: {
     command: "npm run preview -- --host 127.0.0.1 --port 43177 --strictPort",

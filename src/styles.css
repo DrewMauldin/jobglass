@@ -13,8 +13,8 @@
   --panel-soft: #f8f9f7;
   --sidebar: #eef0ed;
   --text: #18201d;
-  --muted: #66716c;
-  --faint: #8a948f;
+  --muted: #5d6863;
+  --faint: #69736e;
   --line: #dce1dd;
   --line-strong: #c8d0ca;
   --accent: #246b58;
@@ -799,7 +799,7 @@ svg {
 .timeline-track > button {
   position: relative;
   display: grid;
-  grid-template-columns: 5.5rem 1rem 1fr;
+  grid-template-columns: 8rem 1rem minmax(0, 1fr);
   grid-template-rows: auto auto;
   gap: 0.1rem 0.6rem;
   width: 100%;
@@ -815,6 +815,7 @@ svg {
   color: var(--muted);
   font-size: 0.68rem;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 .timeline-dot {
   z-index: 2;
@@ -1093,7 +1094,7 @@ svg {
     padding-inline: 0.55rem;
   }
   .nav-label,
-  .nav-item:not(.active) {
+  .nav-item {
     font-size: 0;
   }
   .nav-item {

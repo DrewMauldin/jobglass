@@ -26,6 +26,45 @@ async function expectNoLongTasks(page: Page, operation: string) {
   });
 }
 
+async function contrastRatio(
+  page: Page,
+  foregroundSelector: string,
+  backgroundSelector: string,
+) {
+  return page.evaluate(
+    ([foregroundSelector, backgroundSelector]) => {
+      const luminance = (color: string) => {
+        const channels = color
+          .match(/[\d.]+/gu)
+          ?.slice(0, 3)
+          .map(Number);
+        if (channels?.length !== 3)
+          throw new Error(`could not parse color ${color}`);
+        const [red, green, blue] = channels.map((channel) => {
+          const value = channel / 255;
+          return value <= 0.04045
+            ? value / 12.92
+            : ((value + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+      };
+      const foreground = document.querySelector(foregroundSelector);
+      const background = document.querySelector(backgroundSelector);
+      if (!foreground || !background)
+        throw new Error("contrast target missing");
+      const foregroundLuminance = luminance(getComputedStyle(foreground).color);
+      const backgroundLuminance = luminance(
+        getComputedStyle(background).backgroundColor,
+      );
+      return (
+        (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+        (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+      );
+    },
+    [foregroundSelector, backgroundSelector] as const,
+  );
+}
+
 test("is keyboard-operable, responsive, and free of serious axe findings", async ({
   page,
 }) => {
@@ -54,9 +93,9 @@ test("is keyboard-operable, responsive, and free of serious axe findings", async
     );
   });
   expect(lightViolations).toEqual([]);
-
-  await page.getByRole("combobox", { name: "Theme" }).selectOption("dark");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  expect(
+    await contrastRatio(page, ".summary-grid small", ".summary-grid article"),
+  ).toBeGreaterThanOrEqual(4.5);
 
   await page.getByRole("button", { name: "Export report" }).click();
   await expect(
@@ -72,11 +111,17 @@ test("is keyboard-operable, responsive, and free of serious axe findings", async
     );
   });
   expect(dialogViolations).toEqual([]);
+  expect(
+    await contrastRatio(page, ".privacy-summary p", ".privacy-summary"),
+  ).toBeGreaterThanOrEqual(4.5);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Export report" }),
   ).toBeFocused();
+
+  await page.getByRole("combobox", { name: "Theme" }).selectOption("dark");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
   const darkViolations = await page.evaluate(async () => {
     const result = await (window as unknown as AxeWindow).axe.run();
@@ -111,6 +156,12 @@ test("keeps 5,000-job interactions below the long-task budget", async ({
     "aria-pressed",
     "true",
   );
+  const timelineOverflows = await page
+    .locator(".timeline-time")
+    .evaluateAll((elements) =>
+      elements.some((element) => element.scrollWidth > element.clientWidth),
+    );
+  expect(timelineOverflows).toBe(false);
   await expectNoLongTasks(page, "timeline view");
   await page.getByRole("button", { name: "List" }).click();
   await expectNoLongTasks(page, "list view");

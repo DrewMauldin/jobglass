@@ -38,7 +38,7 @@ The capability file does not grant general shell, filesystem, HTTP, clipboard, u
 
 ## React interface
 
-React owns loading, error, empty, overview, findings, list, timeline, inspector, theme, and privacy-review states. Native HTML controls and semantic regions preserve keyboard and accessibility behaviour. Large lists page by 100 rows.
+React owns loading, error, empty, overview, findings, list, timeline, inspector, theme, and privacy-review states. Native HTML controls and semantic regions preserve keyboard and accessibility behaviour. Large lists page by 25 rows.
 
 ## Decisions and contracts
 
