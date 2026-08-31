@@ -54,10 +54,10 @@ for (const root of roots) {
 }
 
 const failures = [];
+const guardPath = path.normalize("scripts/floor-guard.mjs");
 for (const file of files.filter(
   (candidate) =>
-    candidate !== "scripts/floor-guard.mjs" &&
-    extensions.has(path.extname(candidate)),
+    candidate !== guardPath && extensions.has(path.extname(candidate)),
 )) {
   const contents = await readFile(file, "utf8");
   for (const pattern of forbidden) {
