@@ -165,20 +165,13 @@ pub fn validate_directory_root(root: &Path) -> Result<(), BoundaryError> {
     }
     #[cfg(not(unix))]
     {
-        let mut current = PathBuf::new();
-        let mut final_metadata = None;
-        for component in root.components() {
-            current.push(component.as_os_str());
-            let metadata = std::fs::symlink_metadata(&current).map_err(map_metadata_error)?;
-            if metadata.file_type().is_symlink() {
-                return Err(BoundaryError::SymlinkRejected);
-            }
-            final_metadata = Some(metadata);
-        }
-        match final_metadata {
-            Some(metadata) if metadata.is_dir() => Ok(()),
-            Some(_) => Err(BoundaryError::NotADirectory),
-            None => Err(BoundaryError::PathNotAllowed),
+        let metadata = std::fs::symlink_metadata(root).map_err(map_metadata_error)?;
+        if metadata.file_type().is_symlink() {
+            Err(BoundaryError::SymlinkRejected)
+        } else if metadata.is_dir() {
+            Ok(())
+        } else {
+            Err(BoundaryError::NotADirectory)
         }
     }
 }
