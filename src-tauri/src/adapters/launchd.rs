@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::Cursor;
 
 use plist::{Dictionary, Value};
@@ -154,7 +155,36 @@ pub fn enrich_launchctl(job: &mut ScheduledJob, output: &str) {
     }
 }
 
-pub fn enrich_launchctl_domain(job: &mut ScheduledJob, output: &str) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LaunchctlDomainState {
+    pid: Option<u32>,
+    native_code: Option<i64>,
+}
+
+pub type LaunchctlDomain = HashMap<String, LaunchctlDomainState>;
+
+pub fn parse_launchctl_domain(output: &str) -> LaunchctlDomain {
+    output
+        .lines()
+        .filter_map(|line| {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            if fields.len() < 3 {
+                return None;
+            }
+            let pid = fields[0].parse::<u32>().ok();
+            let native_code = fields[1].parse::<i64>().ok();
+            if pid.is_none() && native_code.is_none() {
+                return None;
+            }
+            Some((
+                fields.last()?.to_string(),
+                LaunchctlDomainState { pid, native_code },
+            ))
+        })
+        .collect()
+}
+
+pub fn enrich_launchctl_domain(job: &mut ScheduledJob, domain: &LaunchctlDomain) {
     let (label, provenance) = match &job.native_identifier {
         Evidence::Available { value, provenance } => (
             value,
@@ -165,19 +195,15 @@ pub fn enrich_launchctl_domain(job: &mut ScheduledJob, output: &str) {
         ),
         Evidence::Unavailable { .. } => return,
     };
-    let fields = output.lines().find_map(|line| {
-        let fields = line.split_whitespace().collect::<Vec<_>>();
-        (fields.len() >= 3 && fields.last() == Some(&label.as_str())).then_some(fields)
-    });
-    let Some(fields) = fields else { return };
-    let pid = fields[0].parse::<u32>().ok();
-    let native_code = fields[1].parse::<i64>().ok();
-    let (state, explanation) = if pid.is_some_and(|value| value > 0) {
+    let Some(domain_state) = domain.get(label) else {
+        return;
+    };
+    let (state, explanation) = if domain_state.pid.is_some_and(|value| value > 0) {
         (
             OutcomeState::Running,
             "launchctl domain table reports that the job is running".into(),
         )
-    } else if let Some(code) = native_code {
+    } else if let Some(code) = domain_state.native_code {
         (
             if code == 0 {
                 OutcomeState::Success
@@ -192,7 +218,7 @@ pub fn enrich_launchctl_domain(job: &mut ScheduledJob, output: &str) {
     job.last_outcome = Evidence::available(
         LastOutcome {
             state,
-            native_code,
+            native_code: domain_state.native_code,
             explanation,
         },
         provenance,

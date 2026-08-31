@@ -37,7 +37,9 @@ fn launchd_fixture_normalises_and_runtime_evidence_enriches_it() {
 
     launchd::enrich_launchctl(&mut job, &fixture("macos/launchctl-backup.txt"));
     assert_eq!(value(&job.last_outcome).state, OutcomeState::Success);
-    launchd::enrich_launchctl_domain(&mut job, &fixture("macos/launchctl-domain.txt"));
+    let domain = launchd::parse_launchctl_domain(&fixture("macos/launchctl-domain.txt"));
+    assert_eq!(domain.len(), 2);
+    launchd::enrich_launchctl_domain(&mut job, &domain);
     assert_eq!(value(&job.last_outcome).state, OutcomeState::Success);
     assert!(
         launchd::parse_plist(

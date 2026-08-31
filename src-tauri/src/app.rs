@@ -64,11 +64,13 @@ fn bundle(
     visibility: Vec<Visibility>,
 ) -> ScanBundle {
     let generated_at = Utc::now();
+    let diagnostics_started = std::time::Instant::now();
     let findings = diagnose(&jobs, &warnings, &visibility, generated_at, |path| {
         Path::new(path).exists()
     });
+    let diagnostics_ms = diagnostics_started.elapsed().as_secs_f64() * 1_000.0;
     eprintln!(
-        "{{\"event\":\"scan.complete\",\"platform\":\"{platform}\",\"jobs\":{},\"warnings\":{},\"findings\":{}}}",
+        "{{\"event\":\"scan.complete\",\"platform\":\"{platform}\",\"jobs\":{},\"warnings\":{},\"findings\":{},\"diagnosticsMs\":{diagnostics_ms:.1}}}",
         jobs.len(),
         warnings.len(),
         findings.len()
@@ -120,13 +122,16 @@ mod macos {
     use crate::process::{NativeTool, run_native_tool};
 
     pub(super) fn scan() -> ScanBundle {
+        let scan_started = std::time::Instant::now();
         let mut jobs = Vec::new();
         let mut warnings = Vec::new();
         let mut visibility = Vec::new();
         let uid = unsafe { libc::getuid() };
         let gui_target = format!("gui/{uid}");
+        let domains_started = std::time::Instant::now();
         let gui_output = domain_output(&gui_target);
         let system_output = domain_output("system");
+        let domains_ms = domains_started.elapsed().as_secs_f64() * 1_000.0;
 
         match std::env::var_os("HOME") {
             Some(home) => {
@@ -134,7 +139,7 @@ mod macos {
                 let limited = scan_directory(
                     &root,
                     JobScope::User,
-                    gui_output.as_deref(),
+                    gui_output.as_ref(),
                     &mut jobs,
                     &mut warnings,
                 );
@@ -163,10 +168,10 @@ mod macos {
 
         let mut system_limited = false;
         for (root, domain) in [
-            ("/Library/LaunchAgents", gui_output.as_deref()),
-            ("/Library/LaunchDaemons", system_output.as_deref()),
-            ("/System/Library/LaunchAgents", gui_output.as_deref()),
-            ("/System/Library/LaunchDaemons", system_output.as_deref()),
+            ("/Library/LaunchAgents", gui_output.as_ref()),
+            ("/Library/LaunchDaemons", system_output.as_ref()),
+            ("/System/Library/LaunchAgents", gui_output.as_ref()),
+            ("/System/Library/LaunchDaemons", system_output.as_ref()),
         ] {
             system_limited |= scan_directory(
                 Path::new(root),
@@ -191,13 +196,19 @@ mod macos {
             },
         });
         jobs.sort_by(|left, right| left.id.cmp(&right.id));
+        let collect_ms = scan_started.elapsed().as_secs_f64() * 1_000.0;
+        eprintln!(
+            "{{\"event\":\"scan.collect\",\"platform\":\"macOS launchd\",\"jobs\":{},\"warnings\":{},\"domainsMs\":{domains_ms:.1},\"collectMs\":{collect_ms:.1}}}",
+            jobs.len(),
+            warnings.len()
+        );
         bundle("macOS launchd", jobs, warnings, visibility)
     }
 
     fn scan_directory(
         root: &Path,
         scope: JobScope,
-        domain_output: Option<&str>,
+        domain_output: Option<&launchd::LaunchctlDomain>,
         jobs: &mut Vec<ScheduledJob>,
         warnings: &mut Vec<ParseWarning>,
     ) -> bool {
@@ -251,8 +262,8 @@ mod macos {
             };
             match launchd::parse_plist(&contents, &source, scope) {
                 Ok(mut job) => {
-                    if let Some(domain_output) = domain_output {
-                        launchd::enrich_launchctl_domain(&mut job, domain_output);
+                    if let Some(domain) = domain_output {
+                        launchd::enrich_launchctl_domain(&mut job, domain);
                     }
                     jobs.push(job);
                 }
@@ -262,7 +273,7 @@ mod macos {
         limited
     }
 
-    fn domain_output(target: &str) -> Option<String> {
+    fn domain_output(target: &str) -> Option<launchd::LaunchctlDomain> {
         run_native_tool(
             NativeTool::Launchctl,
             &["print", target],
@@ -270,7 +281,7 @@ mod macos {
         )
         .ok()
         .filter(|output| output.exit_code == Some(0))
-        .map(|output| output.stdout)
+        .map(|output| launchd::parse_launchctl_domain(&output.stdout))
     }
 }
 
