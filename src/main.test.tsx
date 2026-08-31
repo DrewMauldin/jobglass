@@ -105,6 +105,24 @@ describe("JobGlass desktop experience", () => {
     expect(exportButton).toHaveFocus();
   });
 
+  it("keeps keyboard focus inside the export review", async () => {
+    const user = userEvent.setup();
+    render(<App loader={loadDemo} />);
+    await screen.findByRole("heading", { name: "Scheduled jobs" });
+
+    await user.click(screen.getByRole("button", { name: "Export report" }));
+    const close = screen.getByRole("button", { name: "Close export review" });
+    const review = screen.getByRole("checkbox", {
+      name: /reviewed the privacy summary/i,
+    });
+
+    expect(close).toHaveFocus();
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(review).toHaveFocus();
+    await user.keyboard("{Tab}");
+    expect(close).toHaveFocus();
+  });
+
   it("shows explicit empty and error states", async () => {
     const { rerender } = render(
       <App
@@ -193,6 +211,27 @@ describe("JobGlass desktop experience", () => {
       await screen.findByRole("heading", { name: "Scheduled jobs" }),
     ).toBeVisible();
     expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports non-Error scan and export failures safely", async () => {
+    const user = userEvent.setup();
+    const loader = vi.fn().mockRejectedValue("private scan failure");
+    const { unmount } = render(<App loader={loader} />);
+    expect(
+      await screen.findByRole("heading", { name: "Scheduler scan failed" }),
+    ).toBeVisible();
+    expect(screen.getByText("Unknown scan error")).toBeVisible();
+    unmount();
+
+    const exporter = vi.fn().mockRejectedValue("private export failure");
+    render(<App loader={loadDemo} exporter={exporter} />);
+    await screen.findByRole("heading", { name: "Scheduled jobs" });
+    await user.click(screen.getByRole("button", { name: "Export report" }));
+    await user.click(
+      screen.getByRole("checkbox", { name: /reviewed the privacy summary/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Prepare HTML" }));
+    expect(await screen.findByText("Report preparation failed.")).toBeVisible();
   });
 
   it("paginates a large bundle without changing canonical job IDs", async () => {
