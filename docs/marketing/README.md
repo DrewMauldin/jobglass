@@ -99,6 +99,8 @@ Google gives no indexing or ranking guarantee. Search recommendations should be 
 
 ## Related files
 
+- [Copy and launch framework](copy-and-launch-framework.md)
+
 - [Research manifest](research-manifest.md)
 - [Prioritised backlog](backlog.md)
 - [Future-AI handoff](future-agent-handoff.md)
