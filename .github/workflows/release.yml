@@ -206,7 +206,7 @@ jobs:
           path: release-input
           merge-multiple: true
       - name: Generate source and dependency SBOM
-        uses: anchore/sbom-action@d8a2c0130026bf585de5c176ab8f7ce62d75bf04 # v0.20.7
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: .
           format: cyclonedx-json
