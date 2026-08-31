@@ -90,7 +90,8 @@ jobs:
       - name: Validate workflow syntax
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-          actionlint
+          go_path=$(go env GOPATH)
+          "$go_path/bin/actionlint"
 
   build:
     name: Build ${{ matrix.name }} package
