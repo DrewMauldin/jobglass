@@ -41,7 +41,7 @@ Do not use a terminal command that disables Gatekeeper globally. JobGlass does n
 Choose the `.deb` for Debian/Ubuntu-family systems or the `.AppImage` for a portable package. Desktop WebKit and distribution policy still apply.
 
 ```bash
-sudo apt install ./jobglass_0.1.0_amd64.deb
+sudo apt install ./JobGlass_0.1.0_amd64.deb
 ```
 
 For an AppImage, make only that downloaded file executable and run it:

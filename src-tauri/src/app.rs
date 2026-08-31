@@ -122,7 +122,7 @@ mod macos {
     use crate::app::{ScanBundle, bundle};
     use crate::diagnostics::{Visibility, VisibilityStatus};
     use crate::input::{
-        MAX_JOBS, current_user_home, read_bounded_file_bytes, validate_directory_root,
+        BoundaryError, MAX_JOBS, current_user_home, read_bounded_file_bytes, read_directory,
     };
     use crate::model::{JobScope, ParseWarning, ScheduledJob, SchedulerKind};
     use crate::process::{NativeTool, run_native_tool};
@@ -218,19 +218,9 @@ mod macos {
         jobs: &mut Vec<ScheduledJob>,
         warnings: &mut Vec<ParseWarning>,
     ) -> bool {
-        if !root.exists() {
-            return false;
-        }
-        if let Err(error) = validate_directory_root(root) {
-            warnings.push(warning(
-                "launchd.directory",
-                error.to_string(),
-                &root.display().to_string(),
-            ));
-            return true;
-        }
-        let entries = match std::fs::read_dir(root) {
+        let entries = match read_directory(root) {
             Ok(entries) => entries,
+            Err(BoundaryError::PathMissing) => return false,
             Err(error) => {
                 warnings.push(warning(
                     "launchd.directory",
@@ -263,7 +253,7 @@ mod macos {
                 break;
             }
             let path = match entry {
-                Ok(entry) => entry.path(),
+                Ok(path) => path,
                 Err(error) => {
                     warnings.push(warning(
                         "launchd.entry",
@@ -326,8 +316,12 @@ mod macos {
 
         #[test]
         fn aggregate_job_limit_marks_launchd_visibility_as_limited() {
-            let root = tempfile::tempdir().expect("launchd root");
-            std::fs::write(root.path().join("pending.plist"), b"fixture").expect("launchd fixture");
+            let root_guard = tempfile::tempdir().expect("launchd root");
+            let root = root_guard
+                .path()
+                .canonicalize()
+                .expect("canonical launchd root");
+            std::fs::write(root.join("pending.plist"), b"fixture").expect("launchd fixture");
             let fixture = ScheduledJob::new(
                 SchedulerKind::Launchd,
                 "existing",
@@ -338,13 +332,7 @@ mod macos {
             let mut jobs = vec![fixture; MAX_JOBS];
             let mut warnings = Vec::new();
 
-            let limited = scan_directory(
-                root.path(),
-                JobScope::System,
-                None,
-                &mut jobs,
-                &mut warnings,
-            );
+            let limited = scan_directory(&root, JobScope::System, None, &mut jobs, &mut warnings);
 
             assert!(limited);
             assert_eq!(jobs.len(), MAX_JOBS);
@@ -352,6 +340,31 @@ mod macos {
                 warnings
                     .iter()
                     .any(|warning| warning.code == "launchd.jobLimit")
+            );
+        }
+
+        #[test]
+        fn broken_symlinked_launchd_root_is_permission_limited() {
+            use std::os::unix::fs::symlink;
+
+            let parent_guard = tempfile::tempdir().expect("launchd parent");
+            let parent = parent_guard
+                .path()
+                .canonicalize()
+                .expect("canonical launchd parent");
+            let root = parent.join("LaunchAgents");
+            symlink(parent.join("missing"), &root).expect("broken launchd root symlink");
+            let mut jobs = Vec::new();
+            let mut warnings = Vec::new();
+
+            let limited = scan_directory(&root, JobScope::User, None, &mut jobs, &mut warnings);
+
+            assert!(limited);
+            assert!(jobs.is_empty());
+            assert!(
+                warnings
+                    .iter()
+                    .any(|warning| warning.code == "launchd.directory")
             );
         }
     }
@@ -366,7 +379,9 @@ mod linux {
     use crate::adapters::{AdapterResult, cron, systemd, warning};
     use crate::app::{ScanBundle, bundle};
     use crate::diagnostics::{Visibility, VisibilityStatus};
-    use crate::input::{MAX_JOBS, current_user_name, read_bounded_file, validate_directory_root};
+    use crate::input::{
+        BoundaryError, MAX_JOBS, current_user_name, read_bounded_file, read_directory,
+    };
     use crate::model::{JobScope, ParseWarning, ScheduledJob, SchedulerKind};
     use crate::process::{NativeTool, run_native_tool};
 
@@ -596,7 +611,7 @@ mod linux {
                 break;
             }
             let path = match entry {
-                Ok(entry) => entry.path(),
+                Ok(path) => path,
                 Err(error) => {
                     warnings.push(warning(
                         "cron.entry",
@@ -658,7 +673,7 @@ mod linux {
                 return SourceState::Limited;
             }
             let path = match entry {
-                Ok(entry) => entry.path(),
+                Ok(path) => path,
                 Err(error) => {
                     warnings.push(warning(
                         "cron.periodicEntry",
@@ -700,32 +715,19 @@ mod linux {
     fn directory_entries(
         root: &Path,
         warnings: &mut Vec<ParseWarning>,
-    ) -> Result<Option<std::fs::ReadDir>, ()> {
-        match validate_directory_root(root) {
-            Ok(()) => {}
-            Err(crate::input::BoundaryError::FileRead(message))
-                if std::fs::symlink_metadata(root)
-                    .is_err_and(|error| error.kind() == ErrorKind::NotFound) =>
-            {
-                let _ = message;
-                return Ok(None);
-            }
+    ) -> Result<Option<Vec<Result<std::path::PathBuf, BoundaryError>>>, ()> {
+        match read_directory(root) {
+            Ok(entries) => Ok(Some(entries)),
+            Err(BoundaryError::PathMissing) => Ok(None),
             Err(error) => {
                 warnings.push(warning(
                     "cron.directory",
                     error.to_string(),
                     &root.display().to_string(),
                 ));
-                return Err(());
+                Err(())
             }
         }
-        std::fs::read_dir(root).map(Some).map_err(|error| {
-            warnings.push(warning(
-                "cron.directory",
-                error.to_string(),
-                &root.display().to_string(),
-            ));
-        })
     }
 
     fn append_result(
@@ -925,17 +927,18 @@ mod linux {
         #[test]
         fn system_cron_collector_reads_cron_d_and_periodic_directories() {
             let _compile_complete_linux_scanner: fn() -> ScanBundle = scan;
-            let root = tempfile::tempdir().expect("cron root");
-            std::fs::write(
-                root.path().join("crontab"),
-                "0 2 * * * root /usr/bin/backup\n",
-            )
-            .expect("system crontab");
-            let cron_d = root.path().join("cron.d");
+            let root_guard = tempfile::tempdir().expect("cron root");
+            let root = root_guard
+                .path()
+                .canonicalize()
+                .expect("canonical cron root");
+            std::fs::write(root.join("crontab"), "0 2 * * * root /usr/bin/backup\n")
+                .expect("system crontab");
+            let cron_d = root.join("cron.d");
             std::fs::create_dir(&cron_d).expect("cron.d");
             std::fs::write(cron_d.join("cleanup"), "0 3 * * * root /usr/bin/cleanup\n")
                 .expect("cron.d file");
-            let daily = root.path().join("cron.daily");
+            let daily = root.join("cron.daily");
             std::fs::create_dir(&daily).expect("cron.daily");
             let periodic = daily.join("rotate");
             std::fs::write(&periodic, "#!/bin/sh\n").expect("periodic fixture");
@@ -947,7 +950,7 @@ mod linux {
 
             let mut jobs = Vec::new();
             let mut warnings = Vec::new();
-            let (seen, limited) = scan_system_cron(root.path(), &mut jobs, &mut warnings);
+            let (seen, limited) = scan_system_cron(&root, &mut jobs, &mut warnings);
 
             assert!(seen);
             assert!(!limited, "{warnings:?}");
@@ -965,9 +968,13 @@ mod linux {
 
         #[test]
         fn user_cron_collector_reads_a_direct_accessible_spool_file() {
-            let root = tempfile::tempdir().expect("user cron root");
+            let root_guard = tempfile::tempdir().expect("user cron root");
+            let root = root_guard
+                .path()
+                .canonicalize()
+                .expect("canonical user cron root");
             std::fs::write(
-                root.path().join("fixture-user"),
+                root.join("fixture-user"),
                 "0 4 * * * /usr/bin/refresh --quiet\n",
             )
             .expect("user crontab");
@@ -975,7 +982,7 @@ mod linux {
             let mut warnings = Vec::new();
 
             let visibility =
-                scan_user_cron_roots(&[root.path()], "fixture-user", &mut jobs, &mut warnings);
+                scan_user_cron_roots(&[&root], "fixture-user", &mut jobs, &mut warnings);
 
             assert_eq!(visibility.status, VisibilityStatus::Complete);
             assert!(warnings.is_empty(), "{warnings:?}");

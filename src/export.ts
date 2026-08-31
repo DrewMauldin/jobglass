@@ -15,11 +15,17 @@ export function renderBrowserExport(
   }));
   const argumentsToRedact = policy.includeArguments
     ? []
-    : bundle.jobs.flatMap((job) =>
-        job.arguments.availability === "available"
-          ? job.arguments.value.filter(Boolean)
-          : [],
-      );
+    : [
+        ...new Set(
+          bundle.jobs.flatMap((job) =>
+            job.arguments.availability === "available"
+              ? job.arguments.value
+                  .filter(Boolean)
+                  .flatMap((argument) => [argument, JSON.stringify(argument)])
+              : [],
+          ),
+        ),
+      ].sort((left, right) => right.length - left.length);
   const findings = bundle.findings.map((finding) => ({
     ...finding,
     evidence: finding.evidence.map((item) =>

@@ -283,6 +283,34 @@ fn scope_alone_never_invents_privilege_evidence() {
         value(&windows.jobs[1].privilege_level),
         &PrivilegeLevel::System
     );
+
+    let highest_user = windows::parse_task_xml(
+        fixture("windows/backup-task.xml")
+            .replace("LeastPrivilege", "HighestAvailable")
+            .as_bytes(),
+        "highest user task",
+    )
+    .expect("highest user task fixture");
+    assert_eq!(
+        value(&highest_user.privilege_level),
+        &PrivilegeLevel::Unknown
+    );
+
+    let service = windows::parse_task_xml(
+        fixture("windows/backup-task.xml")
+            .replace("fixture-user", "LOCAL SERVICE")
+            .as_bytes(),
+        "service task",
+    )
+    .expect("service task fixture");
+    assert_eq!(value(&service.scope), &JobScope::System);
+    assert!(matches!(
+        service.privilege_level,
+        Evidence::Unavailable {
+            reason: UnavailableReason::NotReported,
+            ..
+        }
+    ));
 }
 
 #[test]

@@ -23,6 +23,8 @@ pub enum BoundaryError {
     NotARegularFile,
     #[error("scheduler source root was not a directory")]
     NotADirectory,
+    #[error("scheduler source path was not found")]
+    PathMissing,
     #[error("native process exceeded its time limit")]
     ProcessTimeout,
     #[error("native process could not be started: {0}")]
@@ -149,15 +151,116 @@ fn current_user_identity() -> Option<(PathBuf, String)> {
 }
 
 pub fn validate_directory_root(root: &Path) -> Result<(), BoundaryError> {
-    let metadata = std::fs::symlink_metadata(root)
-        .map_err(|error| BoundaryError::FileRead(error.to_string()))?;
-    if metadata.file_type().is_symlink() {
-        return Err(BoundaryError::SymlinkRejected);
+    #[cfg(unix)]
+    {
+        let directory = open_directory_no_follow(root)?;
+        let metadata = File::from(directory)
+            .metadata()
+            .map_err(|error| BoundaryError::FileRead(error.to_string()))?;
+        if metadata.is_dir() {
+            Ok(())
+        } else {
+            Err(BoundaryError::NotADirectory)
+        }
     }
-    if !metadata.is_dir() {
-        return Err(BoundaryError::NotADirectory);
+    #[cfg(not(unix))]
+    {
+        let mut current = PathBuf::new();
+        let mut final_metadata = None;
+        for component in root.components() {
+            current.push(component.as_os_str());
+            let metadata = std::fs::symlink_metadata(&current).map_err(map_metadata_error)?;
+            if metadata.file_type().is_symlink() {
+                return Err(BoundaryError::SymlinkRejected);
+            }
+            final_metadata = Some(metadata);
+        }
+        match final_metadata {
+            Some(metadata) if metadata.is_dir() => Ok(()),
+            Some(_) => Err(BoundaryError::NotADirectory),
+            None => Err(BoundaryError::PathNotAllowed),
+        }
     }
-    Ok(())
+}
+
+pub fn read_directory(root: &Path) -> Result<Vec<Result<PathBuf, BoundaryError>>, BoundaryError> {
+    #[cfg(unix)]
+    {
+        use std::ffi::CStr;
+        use std::os::fd::IntoRawFd;
+        use std::os::unix::ffi::OsStringExt;
+
+        let directory = open_directory_no_follow(root)?;
+        let descriptor = directory.into_raw_fd();
+        let stream = unsafe { libc::fdopendir(descriptor) };
+        if stream.is_null() {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                libc::close(descriptor);
+            }
+            return Err(BoundaryError::FileRead(error.to_string()));
+        }
+        let mut entries = Vec::new();
+        loop {
+            set_errno(0);
+            let entry = unsafe { libc::readdir(stream) };
+            if entry.is_null() {
+                let error = errno();
+                if error != 0 {
+                    entries.push(Err(BoundaryError::FileRead(
+                        std::io::Error::from_raw_os_error(error).to_string(),
+                    )));
+                }
+                break;
+            }
+            let name = unsafe { CStr::from_ptr((*entry).d_name.as_ptr()) }.to_bytes();
+            if name == b"." || name == b".." {
+                continue;
+            }
+            entries.push(Ok(root.join(std::ffi::OsString::from_vec(name.to_vec()))));
+        }
+        unsafe {
+            libc::closedir(stream);
+        }
+        Ok(entries)
+    }
+    #[cfg(not(unix))]
+    {
+        validate_directory_root(root)?;
+        std::fs::read_dir(root)
+            .map_err(map_metadata_error)
+            .map(|entries| {
+                entries
+                    .map(|entry| {
+                        entry
+                            .map(|entry| entry.path())
+                            .map_err(|error| BoundaryError::FileRead(error.to_string()))
+                    })
+                    .collect()
+            })
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn errno() -> i32 {
+    unsafe { *libc::__error() }
+}
+
+#[cfg(target_os = "linux")]
+fn errno() -> i32 {
+    unsafe { *libc::__errno_location() }
+}
+
+#[cfg(unix)]
+fn set_errno(value: i32) {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        *libc::__error() = value;
+    }
+    #[cfg(target_os = "linux")]
+    unsafe {
+        *libc::__errno_location() = value;
+    }
 }
 
 pub fn local_executable_exists(value: &str) -> bool {
@@ -245,13 +348,7 @@ fn open_beneath_root(root: &Path, relative: &Path) -> Result<File, BoundaryError
     use std::ffi::CString;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
     use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let mut root_options = std::fs::OpenOptions::new();
-    root_options
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
-    let root_directory = root_options.open(root).map_err(map_no_follow_error)?;
+    let root_directory = open_directory_no_follow(root)?;
     let components = relative.components().collect::<Vec<_>>();
     if components.is_empty()
         || components
@@ -293,9 +390,58 @@ fn open_beneath_root(root: &Path, relative: &Path) -> Result<File, BoundaryError
 }
 
 #[cfg(unix)]
+fn open_directory_no_follow(root: &Path) -> Result<std::os::fd::OwnedFd, BoundaryError> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    if !root.is_absolute() {
+        return Err(BoundaryError::PathNotAllowed);
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    let mut directory = OwnedFd::from(options.open("/").map_err(map_no_follow_error)?);
+    for component in root.components() {
+        let name = match component {
+            std::path::Component::RootDir => continue,
+            std::path::Component::Normal(name) => name,
+            _ => return Err(BoundaryError::PathNotAllowed),
+        };
+        let name = CString::new(name.as_bytes()).map_err(|_| BoundaryError::PathNotAllowed)?;
+        let descriptor = unsafe {
+            libc::openat(
+                directory.as_raw_fd(),
+                name.as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            )
+        };
+        if descriptor < 0 {
+            return Err(map_no_follow_error(std::io::Error::last_os_error()));
+        }
+        directory = unsafe { OwnedFd::from_raw_fd(descriptor) };
+    }
+    Ok(directory)
+}
+
+#[cfg(unix)]
 fn map_no_follow_error(error: std::io::Error) -> BoundaryError {
-    if matches!(error.raw_os_error(), Some(code) if code == libc::ELOOP || code == libc::ENOTDIR) {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        BoundaryError::PathMissing
+    } else if matches!(error.raw_os_error(), Some(code) if code == libc::ELOOP || code == libc::ENOTDIR)
+    {
         BoundaryError::SymlinkRejected
+    } else {
+        BoundaryError::FileRead(error.to_string())
+    }
+}
+
+#[cfg(not(unix))]
+fn map_metadata_error(error: std::io::Error) -> BoundaryError {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        BoundaryError::PathMissing
     } else {
         BoundaryError::FileRead(error.to_string())
     }

@@ -90,17 +90,17 @@ fn parse_task_node(task: Node<'_, '_>, source: &str) -> Result<ScheduledJob, Par
         &source,
     );
 
-    if let Some(owner) = owner {
-        job.owner = Evidence::available(owner, provenance.clone());
+    if let Some(owner) = owner.as_deref() {
+        job.owner = Evidence::available(owner.to_owned(), provenance.clone());
     }
-    if scope == JobScope::System {
+    if owner.as_deref().is_some_and(is_system_privilege_principal) {
         job.privilege_level = Evidence::available(PrivilegeLevel::System, provenance.clone());
     }
     if scope == JobScope::User
         && let Some(run_level) = principal_text(task, "RunLevel")
     {
         let privilege = if run_level.eq_ignore_ascii_case("HighestAvailable") {
-            PrivilegeLevel::Elevated
+            PrivilegeLevel::Unknown
         } else if run_level.eq_ignore_ascii_case("LeastPrivilege") {
             PrivilegeLevel::StandardUser
         } else {
@@ -353,6 +353,13 @@ fn is_system_principal(value: &str) -> bool {
             | "NT AUTHORITY\\LOCAL SERVICE"
             | "NETWORK SERVICE"
             | "NT AUTHORITY\\NETWORK SERVICE"
+    )
+}
+
+fn is_system_privilege_principal(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_uppercase().as_str(),
+        "SYSTEM" | "LOCAL SYSTEM" | "LOCALSYSTEM" | "NT AUTHORITY\\SYSTEM" | "S-1-5-18"
     )
 }
 

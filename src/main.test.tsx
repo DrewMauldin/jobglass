@@ -136,6 +136,8 @@ describe("JobGlass desktop experience", () => {
 
   it("redacts argument-derived finding evidence and neutralises CSV formulas", () => {
     const secret = '=HYPERLINK("https://example.invalid")';
+    const overlappingSecret = "private-marker";
+    const escapedSecret = 'private-marker"secret\\path';
     const firstJob = demoBundle.jobs[0];
     if (!firstJob) throw new Error("demo fixture must contain a job");
     const bundle = {
@@ -151,7 +153,7 @@ describe("JobGlass desktop experience", () => {
           arguments: {
             ...firstJob.arguments,
             availability: "available" as const,
-            value: [secret],
+            value: [secret, overlappingSecret, escapedSecret],
           },
         },
       ],
@@ -163,7 +165,10 @@ describe("JobGlass desktop experience", () => {
           title: "Duplicate command",
           explanation: "Same executable and arguments",
           jobIds: [firstJob.id],
-          evidence: [`command: /usr/local/sbin/backup ${secret}`],
+          evidence: [
+            `command: /usr/local/sbin/backup ${secret}`,
+            `debug arguments: [${JSON.stringify(escapedSecret)}, ${JSON.stringify(overlappingSecret)}]`,
+          ],
         },
       ],
     };
@@ -182,7 +187,10 @@ describe("JobGlass desktop experience", () => {
 
     expect(parsed.findings[0]?.evidence).toEqual([
       "command: /usr/local/sbin/backup <redacted>",
+      "debug arguments: [<redacted>, <redacted>]",
     ]);
+    expect(json).not.toContain(overlappingSecret);
+    expect(json).not.toContain(JSON.stringify(escapedSecret));
     expect(csv).toContain("'=sensitive name");
     expect(csv).not.toContain('"=sensitive name"');
   });

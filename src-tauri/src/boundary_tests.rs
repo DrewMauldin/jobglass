@@ -29,10 +29,14 @@ fn rejects_invalid_utf8_and_oversized_inputs() {
 #[test]
 fn rejects_files_outside_an_allowlisted_root() {
     let allowed = tempfile::tempdir().expect("allowed temp directory");
+    let allowed_root = allowed
+        .path()
+        .canonicalize()
+        .expect("canonical allowed root");
     let outside = tempfile::NamedTempFile::new().expect("outside temp file");
 
     assert!(matches!(
-        read_bounded_file(outside.path(), &[allowed.path()]),
+        read_bounded_file(outside.path(), &[&allowed_root]),
         Err(BoundaryError::PathNotAllowed)
     ));
 }
@@ -41,15 +45,19 @@ fn rejects_files_outside_an_allowlisted_root() {
 #[test]
 fn bounded_binary_reader_does_not_require_text_encoding() {
     let directory = tempfile::tempdir().expect("temp directory");
-    let path = directory.path().join("binary.plist");
+    let root = directory
+        .path()
+        .canonicalize()
+        .expect("canonical fixture root");
+    let path = root.join("binary.plist");
     std::fs::write(&path, [0xff, 0x00, 0x01]).expect("binary fixture write");
 
     assert_eq!(
-        read_bounded_file_bytes(&path, &[directory.path()]).expect("bounded binary read"),
+        read_bounded_file_bytes(&path, &[&root]).expect("bounded binary read"),
         [0xff, 0x00, 0x01]
     );
     assert!(matches!(
-        read_bounded_file(&path, &[directory.path()]),
+        read_bounded_file(&path, &[&root]),
         Err(BoundaryError::InvalidEncoding)
     ));
 }
@@ -73,13 +81,17 @@ fn rejects_symlink_inputs() {
     use std::os::unix::fs::symlink;
 
     let directory = tempfile::tempdir().expect("temp directory");
-    let target = directory.path().join("target.txt");
-    let link = directory.path().join("link.txt");
+    let root = directory
+        .path()
+        .canonicalize()
+        .expect("canonical fixture root");
+    let target = root.join("target.txt");
+    let link = root.join("link.txt");
     std::fs::write(&target, "safe fixture").expect("fixture write");
     symlink(&target, &link).expect("fixture symlink");
 
     assert!(matches!(
-        read_bounded_file(&link, &[directory.path()]),
+        read_bounded_file(&link, &[&root]),
         Err(BoundaryError::SymlinkRejected)
     ));
 }
@@ -91,13 +103,17 @@ fn rejects_fifo_inputs_without_blocking() {
     use std::os::unix::ffi::OsStrExt;
 
     let directory = tempfile::tempdir().expect("temp directory");
-    let path = directory.path().join("blocking.plist");
+    let root = directory
+        .path()
+        .canonicalize()
+        .expect("canonical fixture root");
+    let path = root.join("blocking.plist");
     let native_path = CString::new(path.as_os_str().as_bytes()).expect("FIFO path");
     assert_eq!(unsafe { libc::mkfifo(native_path.as_ptr(), 0o600) }, 0);
 
     let started = Instant::now();
     assert!(matches!(
-        read_bounded_file_bytes(&path, &[directory.path()]),
+        read_bounded_file_bytes(&path, &[&root]),
         Err(BoundaryError::NotARegularFile)
     ));
     assert!(started.elapsed() < Duration::from_millis(500));
@@ -110,13 +126,21 @@ fn rejects_a_symlink_in_any_parent_component() {
 
     let allowed = tempfile::tempdir().expect("allowed temp directory");
     let outside = tempfile::tempdir().expect("outside temp directory");
-    std::fs::write(outside.path().join("definition"), "secret fixture")
+    let allowed_root = allowed
+        .path()
+        .canonicalize()
+        .expect("canonical allowed root");
+    let outside_root = outside
+        .path()
+        .canonicalize()
+        .expect("canonical outside root");
+    std::fs::write(outside_root.join("definition"), "secret fixture")
         .expect("outside fixture write");
-    let linked_directory = allowed.path().join("linked");
-    symlink(outside.path(), &linked_directory).expect("parent symlink");
+    let linked_directory = allowed_root.join("linked");
+    symlink(&outside_root, &linked_directory).expect("parent symlink");
 
     assert!(matches!(
-        read_bounded_file(&linked_directory.join("definition"), &[allowed.path()]),
+        read_bounded_file(&linked_directory.join("definition"), &[&allowed_root]),
         Err(BoundaryError::SymlinkRejected)
     ));
 }
@@ -135,12 +159,23 @@ fn rejects_symlinked_roots_and_path_probe_type_confusion() {
     use std::os::unix::fs::{PermissionsExt, symlink};
 
     let parent = tempfile::tempdir().expect("parent temp directory");
-    let root = parent.path().join("root");
-    let root_link = parent.path().join("root-link");
+    let parent = parent.path().canonicalize().expect("canonical parent root");
+    let root = parent.join("root");
+    let root_link = parent.join("root-link");
     std::fs::create_dir(&root).expect("fixture root");
     symlink(&root, &root_link).expect("fixture root symlink");
     assert!(matches!(
         validate_directory_root(&root_link),
+        Err(BoundaryError::SymlinkRejected)
+    ));
+
+    let real_parent = parent.join("real-parent");
+    let linked_parent = parent.join("linked-parent");
+    std::fs::create_dir(&real_parent).expect("real parent");
+    std::fs::create_dir(real_parent.join("nested-root")).expect("nested root");
+    symlink(&real_parent, &linked_parent).expect("linked parent");
+    assert!(matches!(
+        validate_directory_root(&linked_parent.join("nested-root")),
         Err(BoundaryError::SymlinkRejected)
     ));
 

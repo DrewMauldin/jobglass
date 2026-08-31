@@ -165,7 +165,7 @@ npm run quality -- full
 npm run tauri:build
 ```
 
-The full quality path checks TypeScript, ESLint, formatting, documentation links, source-floor rules, unit tests, changed-line and overall coverage, production bundle size, Playwright/axe flows at four window sizes, Rust formatting, Clippy with warnings denied, all Rust tests, coverage, the 5,000-job diagnostic benchmark, dependency audits, workflow syntax, and committed-history secret scanning.
+The full quality path checks TypeScript, ESLint, formatting, documentation links, source-floor rules, unit tests, changed-line and overall coverage, production bundle size, Playwright/axe flows at four window sizes, Rust formatting, Clippy with warnings denied, all Rust tests, coverage, the 5,000-job diagnostic benchmark, dependency audits, and committed-history secret scanning. GitHub CI and release jobs additionally validate workflow syntax with actionlint.
 
 Platform packages are built natively on macOS, Ubuntu, and Windows. Release automation binds an annotated version tag to the exact `main` commit, rebuilds the packages, generates checksums and a CycloneDX SBOM, records GitHub provenance, re-downloads the draft assets, verifies them, and only then publishes the release.
 
