@@ -152,8 +152,8 @@
 
 **Acceptance criteria:**
 
-- [ ] Loading, empty, error and populated overview states use semantic HTML.
-- [ ] Summary makes visibility limits clear.
+- [x] Loading, empty, error and populated overview states use semantic HTML.
+- [x] Summary makes visibility limits clear.
 
 **Verification:** Testing Library and axe component tests
 **Dependencies:** Task 9
@@ -164,8 +164,8 @@
 
 **Acceptance criteria:**
 
-- [ ] Keyboard-operable filters and search update both views.
-- [ ] Timeline represents unknown next runs separately.
+- [x] Keyboard-operable filters and search update both views.
+- [x] Timeline represents unknown next runs separately.
 
 **Verification:** component behaviour tests and Playwright flow
 **Dependencies:** Task 12
@@ -176,8 +176,8 @@
 
 **Acceptance criteria:**
 
-- [ ] Details expose provenance, unavailable reasons and warnings.
-- [ ] Findings are understandable without relying on colour.
+- [x] Details expose provenance, unavailable reasons and warnings.
+- [x] Findings are understandable without relying on colour.
 
 **Verification:** component and accessibility tests
 **Dependencies:** Task 13
@@ -188,7 +188,7 @@
 
 **Acceptance criteria:**
 
-- [ ] Export cannot proceed until a redaction policy is reviewed.
+- [x] Export cannot proceed until a redaction policy is reviewed.
 - [ ] Light, dark, reduced-motion and responsive layouts are polished.
 
 **Verification:** export interaction tests, theme screenshots, responsive Playwright matrix

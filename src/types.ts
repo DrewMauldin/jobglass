@@ -95,3 +95,43 @@ export interface ScheduledJob {
   readonly targetService: Evidence<string>;
   readonly parseWarnings: readonly ParseWarning[];
 }
+
+export type FindingSeverity = "info" | "warning" | "error";
+
+export interface Finding {
+  readonly id: string;
+  readonly code: string;
+  readonly severity: FindingSeverity;
+  readonly title: string;
+  readonly explanation: string;
+  readonly jobIds: readonly string[];
+  readonly evidence: readonly string[];
+}
+
+export type VisibilityStatus = "complete" | "permissionLimited" | "unavailable";
+
+export interface Visibility {
+  readonly scheduler: SchedulerKind;
+  readonly scope: JobScope;
+  readonly status: VisibilityStatus;
+  readonly explanation: string;
+}
+
+export interface ScanBundle {
+  readonly schemaVersion: "1.0";
+  readonly scanId: string;
+  readonly generatedAt: string;
+  readonly platform: string;
+  readonly jobs: readonly ScheduledJob[];
+  readonly findings: readonly Finding[];
+  readonly warnings: readonly ParseWarning[];
+  readonly visibility: readonly Visibility[];
+  readonly sampleData: boolean;
+}
+
+export type ExportFormat = "json" | "csv" | "html";
+
+export interface ExportPolicy {
+  readonly reviewed: boolean;
+  readonly includeArguments: boolean;
+}
