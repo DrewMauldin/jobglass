@@ -14,7 +14,7 @@ JobGlass needs one desktop interface on macOS, Linux and Windows while keeping n
 
 ## Decision
 
-Use Tauri 2.11 with a Rust 1.98 core and a React 19.2 TypeScript frontend built by Vite 8.
+Use Tauri 2.11 with a Rust 1.98 core and a React 19.2 TypeScript 6.0 frontend built by Vite 8. TypeScript 7.0 was rejected at bootstrap because the current `typescript-eslint` peer contract supports versions below 6.1; the project fails closed on peer-dependency conflicts instead of forcing an unsupported graph.
 
 Only application-defined read-only commands are registered. No Tauri shell, filesystem, HTTP, updater or logging plugin is exposed to the WebView. The default capability names the main window and the minimum core permission required to render it.
 

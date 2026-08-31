@@ -37,7 +37,7 @@ Unknown values are represented as unavailable with a reason, never as invented d
 
 - Rust 1.98 stable core with platform-specific adapters behind one `SchedulerAdapter` interface.
 - Tauri 2.11 desktop shell with custom commands only and a restrictive capability file.
-- React 19.2, TypeScript 7 and Vite 8 for a static WebView frontend.
+- React 19.2, TypeScript 6.0 and Vite 8 for a static WebView frontend.
 - Vitest and Testing Library for frontend behaviour; Rust unit, integration and property-style tests for parsers and diagnostics; Playwright plus axe-core for browser runtime and accessibility verification.
 
 The selected versions are pinned in repository manifests and lockfiles. See `docs/decisions/0001-tauri-rust-react.md` for rationale and official sources.
@@ -103,7 +103,10 @@ export function ViewSelector({ value, onChange }: ViewSelectorProps) {
   return (
     <label>
       View
-      <select value={value} onChange={(event) => onChange(event.target.value as ViewMode)}>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value as ViewMode)}
+      >
         <option value="list">List</option>
         <option value="timeline">Timeline</option>
       </select>

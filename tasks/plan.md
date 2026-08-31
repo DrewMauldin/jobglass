@@ -72,15 +72,15 @@ Detailed acceptance criteria, verification and file scope live in `tasks/todo.md
 
 ## Risks and mitigations
 
-| Risk | Impact | Mitigation |
-|---|---|---|
-| Native formats vary or are localised | High | Prefer structured files and computer-parsable properties; preserve warnings and fixtures |
-| System scope denied | Medium | Never elevate; show explicit partial visibility |
-| Definition contains secrets | High | Discard environment values; redact arguments by default; review gate before export |
-| Huge or malicious definitions | High | File/output/job caps, no-follow checks, bounded timeouts, property tests |
-| Cross-platform compilation drifts | High | Conditional modules and hosted three-OS matrix |
-| GitHub Actions account gate | Medium | Keep reproducible local proof; inspect whether hosted jobs ran before claiming green |
-| Signing credentials unavailable | Medium | Publish clearly labelled unsigned artifacts only when safe; leave project task in review |
+| Risk                                 | Impact | Mitigation                                                                               |
+| ------------------------------------ | ------ | ---------------------------------------------------------------------------------------- |
+| Native formats vary or are localised | High   | Prefer structured files and computer-parsable properties; preserve warnings and fixtures |
+| System scope denied                  | Medium | Never elevate; show explicit partial visibility                                          |
+| Definition contains secrets          | High   | Discard environment values; redact arguments by default; review gate before export       |
+| Huge or malicious definitions        | High   | File/output/job caps, no-follow checks, bounded timeouts, property tests                 |
+| Cross-platform compilation drifts    | High   | Conditional modules and hosted three-OS matrix                                           |
+| GitHub Actions account gate          | Medium | Keep reproducible local proof; inspect whether hosted jobs ran before claiming green     |
+| Signing credentials unavailable      | Medium | Publish clearly labelled unsigned artifacts only when safe; leave project task in review |
 
 ## Open questions
 

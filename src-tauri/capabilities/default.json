@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Minimum core capability for the local JobGlass main window.",
+  "windows": ["main"],
+  "local": true,
+  "permissions": ["core:default"]
+}
