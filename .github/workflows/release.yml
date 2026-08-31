@@ -32,6 +32,7 @@ jobs:
         id: source
         shell: bash
         run: |
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           test "$(git cat-file -t "$GITHUB_REF_NAME")" = tag
           git fetch --no-tags origin main
           tag_commit=$(git rev-parse "$GITHUB_REF_NAME^{commit}")
