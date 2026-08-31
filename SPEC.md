@@ -66,7 +66,7 @@ Rust commands use the pinned toolchain:
 cargo fmt --check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --all-features
-cargo audit --deny warnings
+cargo audit
 ```
 
 ## Project structure

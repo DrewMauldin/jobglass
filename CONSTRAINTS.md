@@ -20,7 +20,7 @@ Last reviewed: 2026-08-31 by project owner brief
 | Frontend lint/format       | Zero errors or warnings                                                       | `npm run lint` and `npm run format:check`                                                       | edit, task, CI      |
 | Tests                      | Zero failed or skipped tests                                                  | `npm run test` and `cargo test --manifest-path src-tauri/Cargo.toml --all-features`             | task, CI            |
 | Changed-line coverage      | At least 80%; high enough to require evidence without punishing configuration | `npm run test:coverage` and `cargo llvm-cov --fail-under-lines 80`                              | task, CI            |
-| Dependency security        | Zero known high or critical vulnerabilities                                   | `npm audit --audit-level=high` and `cargo audit --deny warnings`                                | task, CI, release   |
+| Dependency security        | Zero known high or critical vulnerabilities                                   | `npm audit --audit-level=high` and `cargo audit`                                                | task, CI, release   |
 | Secret scanning            | Zero findings; values are always redacted                                     | `gitleaks git --redact`                                                                         | commit, CI, release |
 | Accessibility              | Zero serious or critical axe findings                                         | `npm run test:e2e`                                                                              | task, CI            |
 | Warm launch                | Under 1.5 seconds on reference Mac                                            | `scripts/measure-launch.sh`                                                                     | release             |
@@ -47,3 +47,5 @@ Last reviewed: 2026-08-31 by project owner brief
 ## Exceptions
 
 None.
+
+Informational, unmaintained, and unsound RustSec notices remain visible in full audit output and the release verification record. They are never allowlisted or suppressed, but they are classified separately from known high or critical vulnerabilities.

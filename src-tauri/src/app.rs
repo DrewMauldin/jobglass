@@ -467,3 +467,42 @@ mod windows {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ExportFormat, render_export, scan_current_platform};
+
+    #[test]
+    fn live_read_only_scan_and_export_respect_the_boundary_contract() {
+        let bundle = scan_current_platform();
+
+        assert_eq!(bundle.schema_version, "1.0");
+        assert!(!bundle.scan_id.is_empty());
+        assert!(!bundle.generated_at.is_empty());
+        assert!(!bundle.platform.is_empty());
+        assert!(!bundle.sample_data);
+        assert!(bundle.jobs.len() <= crate::input::MAX_JOBS);
+
+        for format in [ExportFormat::Json, ExportFormat::Csv, ExportFormat::Html] {
+            let report = render_export(
+                bundle.jobs.clone(),
+                bundle.findings.clone(),
+                format,
+                true,
+                false,
+            )
+            .expect("reviewed native scan should export");
+            assert!(!report.is_empty());
+        }
+        assert!(
+            render_export(
+                bundle.jobs,
+                bundle.findings,
+                ExportFormat::Json,
+                false,
+                false,
+            )
+            .is_err()
+        );
+    }
+}

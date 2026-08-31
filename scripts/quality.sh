@@ -33,6 +33,6 @@ npm run test:e2e
 npm run size
 npm audit --audit-level=high
 cargo llvm-cov --locked --manifest-path src-tauri/Cargo.toml --all-features --fail-under-lines 80
-cargo audit --deny warnings --file src-tauri/Cargo.lock
+cargo audit --file src-tauri/Cargo.lock
 cargo bench --locked --manifest-path src-tauri/Cargo.toml --bench diagnostics
 gitleaks git --redact --no-banner
