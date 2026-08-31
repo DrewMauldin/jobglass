@@ -35,6 +35,12 @@ libc = "=0.2.183"
 proptest = "=1.11.0"
 tempfile = "=3.27.0"
 
+[dependencies.plist]
+version = "=1.10.0"
+
+[dependencies.roxmltree]
+version = "=0.21.1"
+
 [profile.release]
 codegen-units = 1
 lto = true

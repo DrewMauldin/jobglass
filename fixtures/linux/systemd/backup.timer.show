@@ -1,0 +1,12 @@
+Id=backup.timer
+Names=backup.timer
+LoadState=loaded
+ActiveState=active
+UnitFileState=enabled
+Unit=backup.service
+TimersCalendar={ OnCalendar=*-*-* 03:30:00 ; next_elapse=Mon 2026-08-31 03:30:00 AEST }
+TimersMonotonic={ OnUnitActiveSec=1h ; next_elapse=1h }
+NextElapseUSecRealtime=Mon 2026-08-31 03:30:00 AEST
+LastTriggerUSec=Sun 2026-08-30 03:30:00 AEST
+Wants=network-online.target backup.service
+Requires=basic.target

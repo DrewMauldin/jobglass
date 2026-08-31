@@ -1,0 +1,4 @@
+gui/501/com.jobglass.fixture.backup = {
+    state = not running
+    last exit code = 0
+}

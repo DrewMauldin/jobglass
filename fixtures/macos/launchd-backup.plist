@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.jobglass.fixture.backup</string>
+  <key>ProgramArguments</key>
+  <array><string>/usr/bin/rsync</string><string>--archive</string><string>/Users/fixture/Documents</string></array>
+  <key>StartInterval</key><integer>3600</integer>
+  <key>WatchPaths</key><array><string>/Users/fixture/Documents</string></array>
+  <key>WorkingDirectory</key><string>/Users/fixture</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/fixture/bin</string><key>BACKUP_TOKEN</key><string>TOP_SECRET_VALUE</string></dict>
+</dict>
+</plist>

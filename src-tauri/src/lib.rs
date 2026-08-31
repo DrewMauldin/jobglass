@@ -1,3 +1,4 @@
+pub mod adapters;
 pub mod input;
 pub mod model;
 pub mod process;

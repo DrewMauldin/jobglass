@@ -46,8 +46,8 @@
 
 **Acceptance criteria:**
 
-- [ ] Normal and malformed fixture plists produce deterministic jobs or warnings.
-- [ ] StartInterval, StartCalendarInterval, KeepAlive and path triggers are explained honestly.
+- [x] Normal and malformed fixture plists produce deterministic jobs or warnings.
+- [x] StartInterval, StartCalendarInterval, KeepAlive and path triggers are explained honestly.
 
 **Verification:** macOS fixture integration tests
 **Dependencies:** Task 3
@@ -58,8 +58,8 @@
 
 **Acceptance criteria:**
 
-- [ ] Observable state and last exit code enrich matching jobs.
-- [ ] Denied or missing state remains explicitly unavailable.
+- [x] Observable state and last exit code enrich matching jobs.
+- [x] Denied or missing state remains explicitly unavailable.
 
 **Verification:** launchctl fixture tests and live privacy-safe representative comparison
 **Dependencies:** Task 4
@@ -70,8 +70,8 @@
 
 **Acceptance criteria:**
 
-- [ ] User, `/etc/crontab`, `/etc/cron.d` and periodic sources normalise correctly.
-- [ ] Environment key names persist while values are discarded.
+- [x] User, `/etc/crontab`, `/etc/cron.d` and periodic sources normalise correctly.
+- [x] Environment key names persist while values are discarded.
 
 **Verification:** Linux cron fixture integration tests
 **Dependencies:** Task 3
@@ -82,8 +82,8 @@
 
 **Acceptance criteria:**
 
-- [ ] Timer and target service fields, triggers, dependencies and runtime properties normalise.
-- [ ] Wall-clock and monotonic expressions remain distinguishable.
+- [x] Timer and target service fields, triggers, dependencies and runtime properties normalise.
+- [x] Wall-clock and monotonic expressions remain distinguishable.
 
 **Verification:** Linux systemd fixture integration tests
 **Dependencies:** Task 3
@@ -94,7 +94,7 @@
 
 **Acceptance criteria:**
 
-- [ ] Namespaced XML actions, principals, settings and triggers normalise.
+- [x] Namespaced XML actions, principals, settings and triggers normalise.
 - [ ] Disabled, malformed and access-denied cases are explicit.
 
 **Verification:** Windows fixture integration tests and Windows hosted compilation

@@ -89,6 +89,16 @@ pub enum Evidence<T> {
     },
 }
 
+impl<T> Evidence<T> {
+    pub fn available(value: T, provenance: Provenance) -> Self {
+        Self::Available { value, provenance }
+    }
+
+    pub fn unavailable(reason: UnavailableReason, provenance: Provenance) -> Self {
+        Self::Unavailable { reason, provenance }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ScheduleKind {
@@ -188,6 +198,68 @@ pub struct ScheduledJob {
     pub dependencies: Evidence<Vec<String>>,
     pub target_service: Evidence<String>,
     pub parse_warnings: Vec<ParseWarning>,
+}
+
+impl ScheduledJob {
+    pub fn new(
+        scheduler: SchedulerKind,
+        native_identifier: impl Into<String>,
+        display_name: impl Into<String>,
+        scope: JobScope,
+        source_reference: impl Into<String>,
+    ) -> Self {
+        let native_identifier = native_identifier.into();
+        let source_reference = source_reference.into();
+        let provenance = Provenance {
+            adapter: scheduler,
+            source_reference: source_reference.clone(),
+            detail: None,
+        };
+        macro_rules! unavailable {
+            ($reason:expr) => {
+                Evidence::unavailable($reason, provenance.clone())
+            };
+        }
+
+        Self {
+            schema_version: CONTRACT_VERSION.into(),
+            id: stable_job_id(scheduler, &native_identifier, scope),
+            scheduler: Evidence::available(scheduler, provenance.clone()),
+            native_identifier: Evidence::available(native_identifier, provenance.clone()),
+            display_name: Evidence::available(display_name.into(), provenance.clone()),
+            owner: unavailable!(UnavailableReason::NotReported),
+            scope: Evidence::available(scope, provenance.clone()),
+            privilege_level: Evidence::available(
+                match scope {
+                    JobScope::User => PrivilegeLevel::StandardUser,
+                    JobScope::System => PrivilegeLevel::System,
+                },
+                provenance.clone(),
+            ),
+            enabled: Evidence::available(EnabledState::Unknown, provenance.clone()),
+            schedule: unavailable!(UnavailableReason::NotReported),
+            schedule_explanation: unavailable!(UnavailableReason::NotReported),
+            timezone_basis: unavailable!(UnavailableReason::NotReported),
+            next_run: unavailable!(UnavailableReason::NotReported),
+            last_run: unavailable!(UnavailableReason::NotReported),
+            last_outcome: unavailable!(UnavailableReason::NotReported),
+            executable: unavailable!(UnavailableReason::NotReported),
+            arguments: unavailable!(UnavailableReason::NotReported),
+            working_directory: unavailable!(UnavailableReason::NotReported),
+            environment_keys: Evidence::available(Vec::new(), provenance.clone()),
+            native_source: Evidence::available(
+                NativeSource {
+                    source_type: "nativeDefinition".into(),
+                    reference: source_reference,
+                },
+                provenance.clone(),
+            ),
+            triggers: Evidence::available(Vec::new(), provenance.clone()),
+            dependencies: Evidence::available(Vec::new(), provenance.clone()),
+            target_service: unavailable!(UnavailableReason::NotApplicable),
+            parse_warnings: Vec::new(),
+        }
+    }
 }
 
 pub fn stable_job_id(scheduler: SchedulerKind, native_identifier: &str, scope: JobScope) -> String {

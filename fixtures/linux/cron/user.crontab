@@ -1,0 +1,4 @@
+PATH=/usr/local/bin:/usr/bin
+MAILTO=fixture@example.invalid
+*/15 * * * * /usr/local/bin/refresh-cache --quiet
+@daily /usr/bin/find /tmp -type f
