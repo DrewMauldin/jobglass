@@ -1,4 +1,6 @@
 pub mod adapters;
+pub mod diagnostics;
+pub mod export;
 pub mod input;
 pub mod model;
 pub mod process;

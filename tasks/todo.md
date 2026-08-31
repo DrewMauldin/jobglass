@@ -111,8 +111,8 @@
 
 **Acceptance criteria:**
 
-- [ ] Every required diagnostic has a stable ID, explanation and evidence.
-- [ ] Seeded overlaps and path faults produce deterministic ordering.
+- [x] Every required diagnostic has a stable ID, explanation and evidence.
+- [x] Seeded overlaps and path faults produce deterministic ordering.
 
 **Verification:** focused diagnostics tests and 5,000-job benchmark
 **Dependencies:** Tasks 4-8
@@ -123,8 +123,8 @@
 
 **Acceptance criteria:**
 
-- [ ] JSON, CSV and escaped self-contained HTML are deterministic.
-- [ ] Arguments redact by default and environment values are impossible to export.
+- [x] JSON, CSV and escaped self-contained HTML are deterministic.
+- [x] Arguments redact by default and environment values are impossible to export.
 
 **Verification:** golden export tests and injection/redaction cases
 **Dependencies:** Task 9
@@ -135,8 +135,8 @@
 
 **Acceptance criteria:**
 
-- [ ] Mixed-platform bundle proves diagnostics and exports end to end.
-- [ ] Performance stays inside the 5,000-job budget.
+- [x] Mixed-platform bundle proves diagnostics and exports end to end.
+- [x] Performance stays inside the 5,000-job budget.
 
 **Verification:** full Rust suite and benchmark
 **Dependencies:** Tasks 9-10

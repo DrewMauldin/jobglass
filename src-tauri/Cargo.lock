@@ -1698,6 +1698,7 @@ dependencies = [
 name = "jobglass"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "libc",
  "plist",
  "proptest",
