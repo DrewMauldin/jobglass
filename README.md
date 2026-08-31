@@ -13,3 +13,7 @@ The first commit intentionally contains product contracts only. Implementation h
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE).
+
+## Marketing and discoverability
+
+The repository-local [marketing and discoverability plan](docs/marketing/README.md) contains recommendation-only positioning, claim guardrails, research sources, launch gates and the prioritised backlog.
