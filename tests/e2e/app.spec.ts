@@ -156,6 +156,19 @@ test("keeps 5,000-job interactions below the long-task budget", async ({
     "aria-pressed",
     "true",
   );
+  const [timelineLine, timelineDot] = await Promise.all([
+    page.locator(".timeline-line").first().boundingBox(),
+    page.locator(".timeline-dot").first().boundingBox(),
+  ]);
+  expect(timelineLine).not.toBeNull();
+  expect(timelineDot).not.toBeNull();
+  expect(
+    Math.abs(
+      (timelineLine?.x ?? 0) +
+        (timelineLine?.width ?? 0) / 2 -
+        ((timelineDot?.x ?? 0) + (timelineDot?.width ?? 0) / 2),
+    ),
+  ).toBeLessThanOrEqual(1);
   const timelineOverflows = await page
     .locator(".timeline-time")
     .evaluateAll((elements) =>

@@ -193,6 +193,7 @@ export function App({
             <p className="nav-label">Workspace</p>
             <button
               className={!showFindings ? "nav-item active" : "nav-item"}
+              aria-current={!showFindings ? "page" : undefined}
               type="button"
               onClick={() => {
                 setShowFindings(false);
@@ -202,6 +203,7 @@ export function App({
             </button>
             <button
               className={showFindings ? "nav-item active" : "nav-item"}
+              aria-current={showFindings ? "page" : undefined}
               type="button"
               onClick={() => {
                 setShowFindings(true);
@@ -1073,7 +1075,10 @@ function findingJobNames(
     const name = job ? evidence(job.displayName) : null;
     return name ? [name] : [];
   });
-  return names.length > 0 ? names.join(", ") : "Visibility finding";
+  if (names.length > 0) return names.join(", ");
+  return finding.jobIds.length > 0
+    ? `${String(finding.jobIds.length)} referenced ${plural(finding.jobIds.length, "job")} unavailable`
+    : "Visibility finding";
 }
 
 async function loadBundle(): Promise<ScanBundle> {

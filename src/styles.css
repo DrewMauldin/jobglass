@@ -804,6 +804,7 @@ svg {
   gap: 0.1rem 0.6rem;
   width: 100%;
   min-height: 4.1rem;
+  padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
@@ -834,8 +835,9 @@ svg {
   z-index: 1;
   top: 0.6rem;
   bottom: -0.4rem;
-  left: 6.3rem;
+  left: calc(8rem + 0.6rem + 0.35rem);
   width: 1px;
+  transform: translateX(-50%);
   background: var(--line-strong);
 }
 .timeline-track strong {

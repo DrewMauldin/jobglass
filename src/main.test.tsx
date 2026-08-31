@@ -281,6 +281,7 @@ describe("JobGlass desktop experience", () => {
     await user.click(screen.getByRole("button", { name: /findings 1/i }));
     expect(screen.getByRole("heading", { name: "Findings" })).toBeVisible();
     expect(screen.getByRole("heading", { name: finding.title })).toBeVisible();
+    expect(screen.getByText("1 referenced job unavailable")).toBeVisible();
     expect(screen.getByText(finding.evidence[0] ?? "")).toBeVisible();
   });
 
@@ -289,14 +290,21 @@ describe("JobGlass desktop experience", () => {
     render(<App loader={loadDemo} />);
     await screen.findByRole("heading", { name: "Scheduled jobs" });
 
-    await user.click(screen.getByRole("button", { name: /findings 3/i }));
+    const overview = screen.getByRole("button", { name: "Overview" });
+    const findings = screen.getByRole("button", { name: /findings 3/i });
+    expect(overview).toHaveAttribute("aria-current", "page");
+    expect(findings).not.toHaveAttribute("aria-current");
+    await user.click(findings);
+    expect(findings).toHaveAttribute("aria-current", "page");
+    expect(overview).not.toHaveAttribute("aria-current");
     expect(
       screen.getByRole("heading", { name: "Last run failed" }),
     ).toBeVisible();
     expect(screen.getByText("Visibility finding")).toBeVisible();
     expect(screen.getByText("/etc/cron.d/private")).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Overview" }));
+    await user.click(overview);
+    expect(overview).toHaveAttribute("aria-current", "page");
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Filter by scheduler" }),
       "launchd",
