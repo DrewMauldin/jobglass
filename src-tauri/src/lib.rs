@@ -1,5 +1,9 @@
+pub mod input;
 pub mod model;
+pub mod process;
 
+#[cfg(test)]
+mod boundary_tests;
 #[cfg(test)]
 mod model_tests;
 

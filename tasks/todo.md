@@ -29,8 +29,8 @@
 
 **Acceptance criteria:**
 
-- [ ] Files, outputs and job counts are capped; invalid encoding and symlinks fail safely.
-- [ ] Native commands use fixed argument arrays, output caps and timeouts.
+- [x] Files, outputs and job counts are capped; invalid encoding and symlinks fail safely.
+- [x] Native commands use fixed argument arrays, output caps and timeouts.
 
 **Verification:** property-style malformed input and boundary tests
 **Dependencies:** Task 2
