@@ -36,6 +36,7 @@ fn rejects_files_outside_an_allowlisted_root() {
     ));
 }
 
+#[cfg(unix)]
 #[test]
 fn bounded_binary_reader_does_not_require_text_encoding() {
     let directory = tempfile::tempdir().expect("temp directory");
@@ -49,6 +50,19 @@ fn bounded_binary_reader_does_not_require_text_encoding() {
     assert!(matches!(
         read_bounded_file(&path, &[directory.path()]),
         Err(BoundaryError::InvalidEncoding)
+    ));
+}
+
+#[cfg(not(unix))]
+#[test]
+fn file_boundary_fails_closed_without_component_relative_no_follow_support() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("definition");
+    std::fs::write(&path, b"fixture").expect("fixture write");
+
+    assert!(matches!(
+        read_bounded_file_bytes(&path, &[directory.path()]),
+        Err(BoundaryError::SymlinkRejected)
     ));
 }
 
