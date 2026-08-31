@@ -439,6 +439,24 @@ mod linux {
         let mut limited_any = false;
         for root in roots {
             match std::fs::symlink_metadata(root) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    warnings.push(warning(
+                        "cron.userDirectory",
+                        BoundaryError::SymlinkRejected.to_string(),
+                        &root.display().to_string(),
+                    ));
+                    limited_any = true;
+                    continue;
+                }
+                Ok(metadata) if !metadata.is_dir() => {
+                    warnings.push(warning(
+                        "cron.userDirectory",
+                        BoundaryError::NotADirectory.to_string(),
+                        &root.display().to_string(),
+                    ));
+                    limited_any = true;
+                    continue;
+                }
                 Ok(_) => {}
                 Err(error) if error.kind() == ErrorKind::NotFound => continue,
                 Err(error) => {
@@ -469,9 +487,7 @@ mod linux {
                     );
                     read_any = true;
                 }
-                Err(_)
-                    if std::fs::symlink_metadata(&path)
-                        .is_err_and(|error| error.kind() == ErrorKind::NotFound) => {}
+                Err(BoundaryError::PathMissing) => {}
                 Err(error) => {
                     warnings.push(warning(
                         "cron.userRead",
@@ -569,7 +585,7 @@ mod linux {
                 );
                 SourceState::Read
             }
-            Err(_) if !path.exists() => SourceState::Missing,
+            Err(BoundaryError::PathMissing) => SourceState::Missing,
             Err(error) => {
                 warnings.push(warning(
                     "cron.read",
@@ -967,6 +983,30 @@ mod linux {
         }
 
         #[test]
+        fn broken_system_cron_entry_is_permission_limited() {
+            use std::os::unix::fs::symlink;
+
+            let root_guard = tempfile::tempdir().expect("cron root");
+            let root = root_guard
+                .path()
+                .canonicalize()
+                .expect("canonical cron root");
+            let cron_d = root.join("cron.d");
+            std::fs::create_dir(&cron_d).expect("cron.d");
+            symlink(root.join("missing"), cron_d.join("broken"))
+                .expect("broken cron entry symlink");
+            let mut jobs = Vec::new();
+            let mut warnings = Vec::new();
+
+            let (seen, limited) = scan_system_cron(&root, &mut jobs, &mut warnings);
+
+            assert!(seen);
+            assert!(limited);
+            assert!(jobs.is_empty());
+            assert!(warnings.iter().any(|warning| warning.code == "cron.read"));
+        }
+
+        #[test]
         fn user_cron_collector_reads_a_direct_accessible_spool_file() {
             let root_guard = tempfile::tempdir().expect("user cron root");
             let root = root_guard
@@ -994,6 +1034,32 @@ mod linux {
                     ..
                 }
             ));
+        }
+
+        #[test]
+        fn broken_user_cron_root_is_permission_limited() {
+            use std::os::unix::fs::symlink;
+
+            let parent_guard = tempfile::tempdir().expect("user cron parent");
+            let parent = parent_guard
+                .path()
+                .canonicalize()
+                .expect("canonical user cron parent");
+            let root = parent.join("cron");
+            symlink(parent.join("missing"), &root).expect("broken user cron root symlink");
+            let mut jobs = Vec::new();
+            let mut warnings = Vec::new();
+
+            let visibility =
+                scan_user_cron_roots(&[&root], "fixture-user", &mut jobs, &mut warnings);
+
+            assert_eq!(visibility.status, VisibilityStatus::PermissionLimited);
+            assert!(jobs.is_empty());
+            assert!(
+                warnings
+                    .iter()
+                    .any(|warning| warning.code == "cron.userDirectory")
+            );
         }
 
         #[test]

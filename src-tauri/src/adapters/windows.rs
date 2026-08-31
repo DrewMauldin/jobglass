@@ -9,7 +9,7 @@ use crate::input::{MAX_JOBS, validate_bounded_bytes};
 use crate::model::{
     EnabledState, Evidence, JobScope, LastOutcome, OutcomeState, ParseWarning, PrivilegeLevel,
     Provenance, RunTime, ScheduleKind, ScheduleSpec, ScheduledJob, SchedulerKind, TimezoneBasis,
-    Trigger,
+    Trigger, UnavailableReason,
 };
 
 pub fn parse_task_xml(input: &[u8], source: &str) -> Result<ScheduledJob, ParseWarning> {
@@ -99,19 +99,18 @@ fn parse_task_node(task: Node<'_, '_>, source: &str) -> Result<ScheduledJob, Par
     if scope == JobScope::User
         && let Some(run_level) = principal_text(task, "RunLevel")
     {
-        let privilege = if run_level.eq_ignore_ascii_case("HighestAvailable") {
-            PrivilegeLevel::Unknown
+        job.privilege_level = if run_level.eq_ignore_ascii_case("HighestAvailable") {
+            Evidence::unavailable(UnavailableReason::NotReported, provenance.clone())
         } else if run_level.eq_ignore_ascii_case("LeastPrivilege") {
-            PrivilegeLevel::StandardUser
+            Evidence::available(PrivilegeLevel::StandardUser, provenance.clone())
         } else {
             job.parse_warnings.push(warning(
                 "windows.runLevel",
                 "RunLevel has an invalid value",
                 &source,
             ));
-            PrivilegeLevel::Unknown
+            Evidence::unavailable(UnavailableReason::ParseFailure, provenance.clone())
         };
-        job.privilege_level = Evidence::available(privilege, provenance.clone());
     }
     let enabled_value = task
         .descendants()

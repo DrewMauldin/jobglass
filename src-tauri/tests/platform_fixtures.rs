@@ -203,10 +203,13 @@ fn malformed_native_state_values_remain_unknown_and_warn() {
     let windows_job = windows::parse_task_xml(windows_input.as_bytes(), "invalid Windows state")
         .expect("parse malformed Windows state");
     assert_eq!(value(&windows_job.enabled), &EnabledState::Unknown);
-    assert_eq!(
-        value(&windows_job.privilege_level),
-        &PrivilegeLevel::Unknown
-    );
+    assert!(matches!(
+        windows_job.privilege_level,
+        Evidence::Unavailable {
+            reason: UnavailableReason::ParseFailure,
+            ..
+        }
+    ));
     assert_eq!(windows_job.parse_warnings.len(), 2);
 }
 
@@ -291,10 +294,13 @@ fn scope_alone_never_invents_privilege_evidence() {
         "highest user task",
     )
     .expect("highest user task fixture");
-    assert_eq!(
-        value(&highest_user.privilege_level),
-        &PrivilegeLevel::Unknown
-    );
+    assert!(matches!(
+        highest_user.privilege_level,
+        Evidence::Unavailable {
+            reason: UnavailableReason::NotReported,
+            ..
+        }
+    ));
 
     let service = windows::parse_task_xml(
         fixture("windows/backup-task.xml")
