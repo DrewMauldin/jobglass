@@ -1,4 +1,4 @@
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -59,28 +59,7 @@ pub fn read_bounded_file_bytes(
     for root in allowed_roots {
         validate_directory_root(root)?;
     }
-    let initial_metadata = std::fs::symlink_metadata(path)
-        .map_err(|error| BoundaryError::FileRead(error.to_string()))?;
-    if initial_metadata.file_type().is_symlink() {
-        return Err(BoundaryError::SymlinkRejected);
-    }
-    if !initial_metadata.is_file() {
-        return Err(BoundaryError::NotARegularFile);
-    }
-    enforce_input_size(initial_metadata.len())?;
-
-    let canonical_path = path
-        .canonicalize()
-        .map_err(|error| BoundaryError::FileRead(error.to_string()))?;
-    let path_is_allowed = allowed_roots.iter().any(|root| {
-        root.canonicalize()
-            .is_ok_and(|canonical_root| canonical_path.starts_with(canonical_root))
-    });
-    if !path_is_allowed {
-        return Err(BoundaryError::PathNotAllowed);
-    }
-
-    let mut file = open_read_only_no_follow(path)?;
+    let mut file = open_beneath_allowed_root(path, allowed_roots)?;
     let opened_metadata = file
         .metadata()
         .map_err(|error| BoundaryError::FileRead(error.to_string()))?;
@@ -96,6 +75,53 @@ pub fn read_bounded_file_bytes(
         .map_err(|error| BoundaryError::FileRead(error.to_string()))?;
     validate_bounded_bytes(&bytes)?;
     Ok(bytes)
+}
+
+pub fn valid_environment_key(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .next()
+            .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        && value
+            .chars()
+            .all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+#[cfg(unix)]
+pub fn current_user_home() -> Option<PathBuf> {
+    use std::ffi::CStr;
+    use std::ffi::OsString;
+    use std::mem::MaybeUninit;
+    use std::os::unix::ffi::OsStringExt;
+
+    let suggested = unsafe { libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) };
+    let buffer_size = if suggested > 0 {
+        usize::try_from(suggested).ok()?.min(MAX_INPUT_BYTES)
+    } else {
+        16 * 1024
+    };
+    let mut buffer = vec![0_u8; buffer_size];
+    let mut password_record = MaybeUninit::<libc::passwd>::uninit();
+    let mut result = std::ptr::null_mut();
+    let status = unsafe {
+        libc::getpwuid_r(
+            libc::getuid(),
+            password_record.as_mut_ptr(),
+            buffer.as_mut_ptr().cast(),
+            buffer.len(),
+            &mut result,
+        )
+    };
+    if status != 0 || result.is_null() {
+        return None;
+    }
+    let password_record = unsafe { password_record.assume_init() };
+    if password_record.pw_dir.is_null() {
+        return None;
+    }
+    let bytes = unsafe { CStr::from_ptr(password_record.pw_dir) }.to_bytes();
+    Some(PathBuf::from(OsString::from_vec(bytes.to_vec())))
 }
 
 pub fn validate_directory_root(root: &Path) -> Result<(), BoundaryError> {
@@ -166,6 +192,7 @@ fn is_network_location(path: &Path, value: &str) -> bool {
     }
     #[cfg(not(unix))]
     {
+        let _ = path;
         false
     }
 }
@@ -180,15 +207,76 @@ fn enforce_input_size(size: u64) -> Result<(), BoundaryError> {
     }
 }
 
-fn open_read_only_no_follow(path: &Path) -> Result<File, BoundaryError> {
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+fn open_beneath_allowed_root(path: &Path, allowed_roots: &[&Path]) -> Result<File, BoundaryError> {
+    for root in allowed_roots {
+        if let Ok(relative) = path.strip_prefix(root) {
+            return open_beneath_root(root, relative);
+        }
     }
-    options
-        .open(path)
-        .map_err(|error| BoundaryError::FileRead(error.to_string()))
+    Err(BoundaryError::PathNotAllowed)
+}
+
+#[cfg(unix)]
+fn open_beneath_root(root: &Path, relative: &Path) -> Result<File, BoundaryError> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut root_options = std::fs::OpenOptions::new();
+    root_options
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    let root_directory = root_options.open(root).map_err(map_no_follow_error)?;
+    let components = relative.components().collect::<Vec<_>>();
+    if components.is_empty()
+        || components
+            .iter()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(BoundaryError::PathNotAllowed);
+    }
+
+    let mut directory: Option<OwnedFd> = None;
+    for (index, component) in components.iter().enumerate() {
+        let std::path::Component::Normal(name) = component else {
+            return Err(BoundaryError::PathNotAllowed);
+        };
+        let name = CString::new(name.as_bytes()).map_err(|_| BoundaryError::PathNotAllowed)?;
+        let parent_fd = directory
+            .as_ref()
+            .map_or(root_directory.as_raw_fd(), AsRawFd::as_raw_fd);
+        let is_final = index + 1 == components.len();
+        let flags = libc::O_RDONLY
+            | libc::O_NOFOLLOW
+            | libc::O_CLOEXEC
+            | if is_final { 0 } else { libc::O_DIRECTORY };
+        let file_descriptor = unsafe { libc::openat(parent_fd, name.as_ptr(), flags) };
+        if file_descriptor < 0 {
+            return Err(map_no_follow_error(std::io::Error::last_os_error()));
+        }
+        let opened = unsafe { OwnedFd::from_raw_fd(file_descriptor) };
+        if is_final {
+            return Ok(File::from(opened));
+        }
+        directory = Some(opened);
+    }
+    Err(BoundaryError::PathNotAllowed)
+}
+
+#[cfg(unix)]
+fn map_no_follow_error(error: std::io::Error) -> BoundaryError {
+    if matches!(error.raw_os_error(), Some(code) if code == libc::ELOOP || code == libc::ENOTDIR) {
+        BoundaryError::SymlinkRejected
+    } else {
+        BoundaryError::FileRead(error.to_string())
+    }
+}
+
+#[cfg(not(unix))]
+fn open_beneath_root(_root: &Path, _relative: &Path) -> Result<File, BoundaryError> {
+    // The Windows scanners consume bounded native command output rather than scheduler files.
+    // Fail closed if this file boundary is ever reached on a platform where component-relative
+    // no-follow opens are not implemented.
+    Err(BoundaryError::SymlinkRejected)
 }

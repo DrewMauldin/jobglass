@@ -4,7 +4,7 @@ use std::io::Cursor;
 use plist::{Dictionary, Value};
 
 use crate::adapters::warning;
-use crate::input::validate_bounded_bytes;
+use crate::input::{valid_environment_key, validate_bounded_bytes};
 use crate::model::{
     EnabledState, Evidence, JobScope, LastOutcome, OutcomeState, ParseWarning, Provenance,
     ScheduleKind, ScheduleSpec, ScheduledJob, SchedulerKind, TimezoneBasis, Trigger,
@@ -31,18 +31,20 @@ pub fn parse_plist(
     let provenance = provenance(source);
     let mut job = ScheduledJob::new(SchedulerKind::Launchd, label, label, scope, source);
 
-    job.enabled = Evidence::available(
-        if dictionary
-            .get("Disabled")
-            .and_then(Value::as_boolean)
-            .unwrap_or(false)
-        {
-            EnabledState::Disabled
-        } else {
-            EnabledState::Enabled
-        },
-        provenance.clone(),
-    );
+    let enabled = match dictionary.get("Disabled") {
+        None => EnabledState::Enabled,
+        Some(value) if value.as_boolean() == Some(true) => EnabledState::Disabled,
+        Some(value) if value.as_boolean() == Some(false) => EnabledState::Enabled,
+        Some(_) => {
+            job.parse_warnings.push(warning(
+                "launchd.disabled",
+                "Disabled has an invalid value",
+                source,
+            ));
+            EnabledState::Unknown
+        }
+    };
+    job.enabled = Evidence::available(enabled, provenance.clone());
 
     let program = string(dictionary, "Program").map(str::to_owned);
     let program_arguments = strings(dictionary.get("ProgramArguments"));
@@ -62,11 +64,23 @@ pub fn parse_plist(
         job.working_directory = Evidence::available(directory.into(), provenance.clone());
     }
 
-    let mut environment_keys = dictionary
+    let mut environment_keys = Vec::new();
+    if let Some(environment) = dictionary
         .get("EnvironmentVariables")
         .and_then(Value::as_dictionary)
-        .map(|environment| environment.keys().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
+    {
+        for key in environment.keys() {
+            if valid_environment_key(key) {
+                environment_keys.push(key.clone());
+            } else {
+                job.parse_warnings.push(warning(
+                    "launchd.environmentKey",
+                    "an invalid environment key was omitted",
+                    source,
+                ));
+            }
+        }
+    }
     environment_keys.sort();
     job.environment_keys = Evidence::available(environment_keys, provenance.clone());
 

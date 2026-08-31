@@ -17,7 +17,14 @@ const changed = new Map();
 let currentFile;
 for (const line of diff.split("\n")) {
   if (line.startsWith("+++ b/")) {
-    currentFile = line.slice(6);
+    const candidate = line.slice(6);
+    currentFile =
+      /\.test\.[cm]?[jt]sx?$/u.test(candidate) ||
+      candidate.startsWith("src/test/") ||
+      candidate === "src/types.ts" ||
+      candidate.endsWith(".css")
+        ? undefined
+        : candidate;
     continue;
   }
   const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/u);
@@ -45,9 +52,13 @@ for (const line of (await readFile("coverage/lcov.info", "utf8")).split("\n")) {
 let executable = 0;
 let covered = 0;
 const missed = [];
+const missingFiles = [];
 for (const [file, lines] of changed) {
   const fileCoverage = coverage.get(file);
-  if (!fileCoverage) continue;
+  if (!fileCoverage) {
+    missingFiles.push(file);
+    continue;
+  }
   for (const line of lines) {
     const hits = fileCoverage.get(line);
     if (hits === undefined) continue;
@@ -55,6 +66,13 @@ for (const [file, lines] of changed) {
     if (hits > 0) covered += 1;
     else missed.push(`${file}:${line}`);
   }
+}
+
+if (missingFiles.length > 0) {
+  console.error(
+    `changed source files missing from coverage: ${missingFiles.join(", ")}`,
+  );
+  process.exit(1);
 }
 
 if (executable === 0) {

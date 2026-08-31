@@ -70,7 +70,7 @@
 
 **Acceptance criteria:**
 
-- [x] User, `/etc/crontab`, `/etc/cron.d` and periodic sources normalise correctly.
+- [x] User-format fixtures, `/etc/crontab`, `/etc/cron.d` and periodic sources normalise correctly; native user-crontab access remains explicitly unavailable.
 - [x] Environment key names persist while values are discarded.
 
 **Verification:** Linux cron fixture integration tests

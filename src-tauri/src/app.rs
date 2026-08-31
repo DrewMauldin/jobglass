@@ -114,14 +114,16 @@ fn scan_current_platform() -> ScanBundle {
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::time::Duration;
 
     use crate::adapters::launchd;
     use crate::adapters::warning;
     use crate::app::{ScanBundle, bundle};
     use crate::diagnostics::{Visibility, VisibilityStatus};
-    use crate::input::{MAX_JOBS, read_bounded_file_bytes, validate_directory_root};
+    use crate::input::{
+        MAX_JOBS, current_user_home, read_bounded_file_bytes, validate_directory_root,
+    };
     use crate::model::{JobScope, ParseWarning, ScheduledJob, SchedulerKind};
     use crate::process::{NativeTool, run_native_tool};
 
@@ -137,9 +139,9 @@ mod macos {
         let system_output = domain_output("system");
         let domains_ms = domains_started.elapsed().as_secs_f64() * 1_000.0;
 
-        match std::env::var_os("HOME") {
+        match current_user_home() {
             Some(home) => {
-                let root = PathBuf::from(home).join("Library/LaunchAgents");
+                let root = home.join("Library/LaunchAgents");
                 let limited = scan_directory(
                     &root,
                     JobScope::User,
@@ -239,13 +241,25 @@ mod macos {
             }
         };
         let mut limited = false;
+        let scan_started = std::time::Instant::now();
+        let mut definitions_seen = 0_usize;
         for entry in entries {
+            if scan_started.elapsed() >= Duration::from_secs(5) {
+                warnings.push(warning(
+                    "launchd.directoryTimeout",
+                    "directory scan exceeded its time limit",
+                    &root.display().to_string(),
+                ));
+                limited = true;
+                break;
+            }
             if jobs.len() >= MAX_JOBS {
                 warnings.push(warning(
                     "launchd.jobLimit",
                     format!("job limit of {MAX_JOBS} reached"),
                     &root.display().to_string(),
                 ));
+                limited = true;
                 break;
             }
             let path = match entry {
@@ -262,6 +276,16 @@ mod macos {
             };
             if path.extension().and_then(|value| value.to_str()) != Some("plist") {
                 continue;
+            }
+            definitions_seen += 1;
+            if definitions_seen > MAX_JOBS {
+                warnings.push(warning(
+                    "launchd.definitionLimit",
+                    format!("definition limit of {MAX_JOBS} reached"),
+                    &root.display().to_string(),
+                ));
+                limited = true;
+                break;
             }
             let source = path.display().to_string();
             let contents = match read_bounded_file_bytes(&path, &[root]) {
@@ -295,6 +319,42 @@ mod macos {
         .filter(|output| output.exit_code == Some(0))
         .map(|output| launchd::parse_launchctl_domain(&output.stdout))
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn aggregate_job_limit_marks_launchd_visibility_as_limited() {
+            let root = tempfile::tempdir().expect("launchd root");
+            std::fs::write(root.path().join("pending.plist"), b"fixture").expect("launchd fixture");
+            let fixture = ScheduledJob::new(
+                SchedulerKind::Launchd,
+                "existing",
+                "Existing fixture",
+                JobScope::System,
+                "fixture",
+            );
+            let mut jobs = vec![fixture; MAX_JOBS];
+            let mut warnings = Vec::new();
+
+            let limited = scan_directory(
+                root.path(),
+                JobScope::System,
+                None,
+                &mut jobs,
+                &mut warnings,
+            );
+
+            assert!(limited);
+            assert_eq!(jobs.len(), MAX_JOBS);
+            assert!(
+                warnings
+                    .iter()
+                    .any(|warning| warning.code == "launchd.jobLimit")
+            );
+        }
+    }
 }
 
 #[cfg(any(target_os = "linux", all(test, unix)))]
@@ -314,35 +374,11 @@ mod linux {
         let mut jobs = Vec::new();
         let mut warnings = Vec::new();
         let mut visibility = Vec::new();
-        match run_native_tool(NativeTool::Crontab, &["-l"], Duration::from_secs(2)) {
-            Ok(output) if output.exit_code == Some(0) => {
-                let result = cron::parse_crontab(
-                    &output.stdout,
-                    "user crontab",
-                    JobScope::User,
-                    None,
-                    false,
-                );
-                append_result(&mut jobs, &mut warnings, result, "user crontab");
-                visibility.push(visible(SchedulerKind::Cron, JobScope::User));
-            }
-            Ok(output) if output.stderr.to_ascii_lowercase().contains("no crontab") => {
-                visibility.push(visible(SchedulerKind::Cron, JobScope::User));
-            }
-            Ok(_) => visibility.push(limited(
-                SchedulerKind::Cron,
-                JobScope::User,
-                "The user crontab could not be read.",
-            )),
-            Err(error) => {
-                warnings.push(warning("cron.command", error.to_string(), "crontab -l"));
-                visibility.push(limited(
-                    SchedulerKind::Cron,
-                    JobScope::User,
-                    "The crontab utility was unavailable.",
-                ));
-            }
-        }
+        visibility.push(unavailable(
+            SchedulerKind::Cron,
+            JobScope::User,
+            "User crontabs are not read through the privilege-bearing crontab helper.",
+        ));
         let (system_cron_seen, system_cron_limited) =
             scan_system_cron(Path::new("/etc"), &mut jobs, &mut warnings);
         if system_cron_seen && !system_cron_limited {
@@ -460,7 +496,24 @@ mod linux {
             Err(()) => return SourceState::Limited,
         };
         let mut limited = false;
+        let scan_started = std::time::Instant::now();
+        let mut definitions_seen = 0_usize;
         for entry in entries {
+            if scan_started.elapsed() >= Duration::from_secs(5) {
+                warnings.push(warning(
+                    "cron.directoryTimeout",
+                    "directory scan exceeded its time limit",
+                    &root.display().to_string(),
+                ));
+                limited = true;
+                break;
+            }
+            definitions_seen += 1;
+            if definitions_seen > MAX_JOBS {
+                push_job_limit_warning(warnings, &root.display().to_string());
+                limited = true;
+                break;
+            }
             let path = match entry {
                 Ok(entry) => entry.path(),
                 Err(error) => {
@@ -503,7 +556,22 @@ mod linux {
             Err(()) => return SourceState::Limited,
         };
         let mut limited = false;
+        let scan_started = std::time::Instant::now();
+        let mut definitions_seen = 0_usize;
         for entry in entries {
+            if scan_started.elapsed() >= Duration::from_secs(5) {
+                warnings.push(warning(
+                    "cron.periodicDirectoryTimeout",
+                    "directory scan exceeded its time limit",
+                    &root.display().to_string(),
+                ));
+                return SourceState::Limited;
+            }
+            definitions_seen += 1;
+            if definitions_seen > MAX_JOBS {
+                push_job_limit_warning(warnings, &root.display().to_string());
+                return SourceState::Limited;
+            }
             if jobs.len() >= MAX_JOBS {
                 push_job_limit_warning(warnings, &root.display().to_string());
                 return SourceState::Limited;
@@ -657,11 +725,28 @@ mod linux {
             }
         };
         let mut scan_limited = false;
+        let scan_started = std::time::Instant::now();
+        let mut definitions_seen = 0_usize;
         for identifier in list
             .stdout
             .lines()
             .filter_map(|line| line.split_whitespace().next())
         {
+            if scan_started.elapsed() >= Duration::from_secs(15) {
+                warnings.push(warning(
+                    "systemd.scopeTimeout",
+                    "timer scan exceeded its aggregate time limit",
+                    "systemctl list-unit-files",
+                ));
+                scan_limited = true;
+                break;
+            }
+            definitions_seen += 1;
+            if definitions_seen > MAX_JOBS {
+                push_job_limit_warning(warnings, "systemctl list-unit-files");
+                scan_limited = true;
+                break;
+            }
             if jobs.len() >= MAX_JOBS {
                 push_job_limit_warning(warnings, "systemctl list-unit-files");
                 scan_limited = true;
@@ -909,8 +994,6 @@ mod windows {
                     "-NoLogo",
                     "-NoProfile",
                     "-NonInteractive",
-                    "-ExecutionPolicy",
-                    "Bypass",
                     "-Command",
                     RUNTIME_QUERY,
                 ],
@@ -970,7 +1053,7 @@ mod windows {
         )
     }
 
-    const RUNTIME_QUERY: &str = r#"$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); function Convert-Iso($value) { if ($null -eq $value -or $value -le [DateTime]::MinValue) { return $null }; return $value.ToUniversalTime().ToString('o',[Globalization.CultureInfo]::InvariantCulture) }; $records=@(Get-ScheduledTask -ErrorAction Stop | ForEach-Object { $task=$_; $info=$task | Get-ScheduledTaskInfo -ErrorAction Stop; [PSCustomObject]@{ identifier=($task.TaskPath+$task.TaskName); nextRunTime=(Convert-Iso $info.NextRunTime); lastRunTime=(Convert-Iso $info.LastRunTime); lastTaskResult=[Int64]$info.LastTaskResult; state=[String]$task.State } }); ConvertTo-Json -InputObject $records -Compress"#;
+    const RUNTIME_QUERY: &str = r#"$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $module=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell','v1.0','Modules','ScheduledTasks','ScheduledTasks.psd1'); Import-Module -Name $module -ErrorAction Stop; function Convert-Iso($value) { if ($null -eq $value -or $value -le [DateTime]::MinValue) { return $null }; return $value.ToUniversalTime().ToString('o',[Globalization.CultureInfo]::InvariantCulture) }; $records=@(Get-ScheduledTask -ErrorAction Stop | ForEach-Object { $task=$_; $info=$task | Get-ScheduledTaskInfo -ErrorAction Stop; [PSCustomObject]@{ identifier=($task.TaskPath+$task.TaskName); nextRunTime=(Convert-Iso $info.NextRunTime); lastRunTime=(Convert-Iso $info.LastRunTime); lastTaskResult=[Int64]$info.LastTaskResult; state=[String]$task.State } }); ConvertTo-Json -InputObject $records -Compress"#;
 
     #[cfg(test)]
     mod tests {
@@ -980,7 +1063,9 @@ mod windows {
         fn windows_scanner_and_invariant_runtime_query_compile_together() {
             let _compile_complete_windows_scanner: fn() -> ScanBundle = scan;
             assert!(RUNTIME_QUERY.contains("ToUniversalTime().ToString('o'"));
+            assert!(RUNTIME_QUERY.contains("[Environment]::SystemDirectory"));
             assert!(!RUNTIME_QUERY.contains("/S "));
+            assert!(!RUNTIME_QUERY.contains("ExecutionPolicy"));
         }
 
         #[cfg(unix)]

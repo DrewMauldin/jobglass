@@ -103,7 +103,7 @@ fn malformed_definition_findings_have_unique_stable_ids() {
         ParseWarning {
             code: "cron.malformedLine".into(),
             message: "line 2 is malformed".into(),
-            source_reference: "fixture:2".into(),
+            source_reference: "fixture:1".into(),
         },
     ];
     let findings = diagnose(&[], &warnings, &[], Utc::now(), |_| true, |_| true);
@@ -184,7 +184,7 @@ fn csv_export_neutralises_spreadsheet_formulas() {
         "fixture task",
     )
     .expect("Windows fixture");
-    job.display_name = available("=2+2".into(), &job.display_name);
+    job.display_name = available("\t =2+2".into(), &job.display_name);
 
     let csv = export_csv(
         &[job],
@@ -196,7 +196,7 @@ fn csv_export_neutralises_spreadsheet_formulas() {
     )
     .expect("reviewed CSV export");
 
-    assert!(csv.contains("\"'=2+2\""));
+    assert!(csv.contains("\"'\t =2+2\""));
 }
 
 #[test]

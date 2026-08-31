@@ -27,7 +27,7 @@ measure_launch() {
   app_pid=$!
 
   attempt=0
-  while ! rg --quiet '"event":"scan.complete"' "$receipt_log"; do
+  while ! grep -q '"event":"scan.complete"' "$receipt_log"; do
     if ! kill -0 "$app_pid" 2>/dev/null; then
       printf 'JobGlass exited before the scan receipt was emitted.\n' >&2
       sed -n '1,80p' "$receipt_log" >&2
@@ -43,7 +43,7 @@ measure_launch() {
 
   finished=$(perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e 'printf "%.9f", clock_gettime(CLOCK_MONOTONIC)')
   elapsed_ms=$(perl -e 'printf "%.1f", ($ARGV[1] - $ARGV[0]) * 1000' "$started" "$finished")
-  scan_receipt=$(rg --only-matching '\{"event":"scan\.complete"[^}]+\}' "$receipt_log" | head -n 1)
+  scan_receipt=$(grep -oE '\{"event":"scan\.complete"[^}]+\}' "$receipt_log" | head -n 1)
 }
 
 measure_launch

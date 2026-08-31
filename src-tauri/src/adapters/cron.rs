@@ -1,5 +1,5 @@
 use crate::adapters::{AdapterResult, warning};
-use crate::input::MAX_JOBS;
+use crate::input::{MAX_JOBS, valid_environment_key};
 use crate::model::{
     EnabledState, Evidence, JobScope, Provenance, ScheduleKind, ScheduleSpec, ScheduledJob,
     SchedulerKind, TimezoneBasis, Trigger,
@@ -14,12 +14,22 @@ pub fn parse_crontab(
 ) -> AdapterResult {
     let mut result = AdapterResult::default();
     let mut environment_keys = Vec::new();
+    let mut definitions_seen = 0_usize;
 
     for (index, raw_line) in input.lines().enumerate() {
         let line_number = index + 1;
         let line = raw_line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
+        }
+        definitions_seen += 1;
+        if definitions_seen > MAX_JOBS {
+            result.warnings.push(warning(
+                "cron.definitionLimit",
+                format!("definition limit of {MAX_JOBS} reached"),
+                source,
+            ));
+            break;
         }
         if let Some(key) = environment_assignment_key(line) {
             if !environment_keys.iter().any(|existing| existing == key) {
@@ -42,7 +52,16 @@ pub fn parse_crontab(
                 let source_reference = format!("{source}:{line_number}");
                 let identifier = format!("{source}:{line_number}:{schedule}");
                 let provenance = provenance(&source_reference);
-                let (executable, arguments) = split_command(&command);
+                let Some((inline_environment_keys, executable, arguments)) =
+                    split_command(&command)
+                else {
+                    result.warnings.push(warning(
+                        "cron.malformedCommand",
+                        format!("line {line_number} has no valid command"),
+                        &source_reference,
+                    ));
+                    continue;
+                };
                 let display_name = executable.as_deref().unwrap_or("cron entry");
                 let mut job = ScheduledJob::new(
                     SchedulerKind::Cron,
@@ -79,8 +98,12 @@ pub fn parse_crontab(
                     job.executable = Evidence::available(executable, provenance.clone());
                     job.arguments = Evidence::available(arguments, provenance.clone());
                 }
+                let mut job_environment_keys = environment_keys.clone();
+                job_environment_keys.extend(inline_environment_keys);
+                job_environment_keys.sort();
+                job_environment_keys.dedup();
                 job.environment_keys =
-                    Evidence::available(environment_keys.clone(), provenance.clone());
+                    Evidence::available(job_environment_keys, provenance.clone());
                 job.triggers = Evidence::available(
                     vec![Trigger {
                         kind: "calendar".into(),
@@ -219,23 +242,22 @@ fn calendar_value(value: &str, minimum: u8, maximum: u8, names: &[&str]) -> Opti
 
 fn environment_assignment_key(line: &str) -> Option<&str> {
     let (key, _) = line.split_once('=')?;
-    (!key.is_empty()
-        && key
-            .chars()
-            .all(|character| character == '_' || character.is_ascii_alphanumeric())
-        && key
-            .chars()
-            .next()
-            .is_some_and(|character| character == '_' || character.is_ascii_alphabetic()))
-    .then_some(key)
+    valid_environment_key(key).then_some(key)
 }
 
-fn split_command(command: &str) -> (Option<String>, Vec<String>) {
-    let mut parts = command.split_whitespace();
-    (
-        parts.next().map(str::to_owned),
-        parts.map(str::to_owned).collect(),
-    )
+fn split_command(command: &str) -> Option<(Vec<String>, Option<String>, Vec<String>)> {
+    let mut parts = shlex::split(command)?.into_iter().peekable();
+    let mut environment_keys = Vec::new();
+    while let Some(key) = parts
+        .peek()
+        .and_then(|part| environment_assignment_key(part))
+    {
+        environment_keys.push(key.to_owned());
+        parts.next();
+    }
+    let executable = parts.next();
+    executable.as_ref()?;
+    Some((environment_keys, executable, parts.collect()))
 }
 
 fn explain_schedule(schedule: &str) -> String {

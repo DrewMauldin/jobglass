@@ -94,29 +94,38 @@ fn parse_task_node(task: Node<'_, '_>, source: &str) -> Result<ScheduledJob, Par
     if scope == JobScope::User
         && let Some(run_level) = principal_text(task, "RunLevel")
     {
-        job.privilege_level = Evidence::available(
-            if run_level.eq_ignore_ascii_case("HighestAvailable") {
-                PrivilegeLevel::Elevated
-            } else {
-                PrivilegeLevel::StandardUser
-            },
-            provenance.clone(),
-        );
+        let privilege = if run_level.eq_ignore_ascii_case("HighestAvailable") {
+            PrivilegeLevel::Elevated
+        } else if run_level.eq_ignore_ascii_case("LeastPrivilege") {
+            PrivilegeLevel::StandardUser
+        } else {
+            job.parse_warnings.push(warning(
+                "windows.runLevel",
+                "RunLevel has an invalid value",
+                &source,
+            ));
+            PrivilegeLevel::Unknown
+        };
+        job.privilege_level = Evidence::available(privilege, provenance.clone());
     }
-    let enabled = task
+    let enabled_value = task
         .descendants()
         .find(|node| node.is_element() && node.tag_name().name() == "Settings")
-        .and_then(|settings| direct_child_text(settings, "Enabled"))
-        .map(|value| !value.eq_ignore_ascii_case("false"))
-        .unwrap_or(true);
-    job.enabled = Evidence::available(
-        if enabled {
-            EnabledState::Enabled
-        } else {
-            EnabledState::Disabled
-        },
-        provenance.clone(),
-    );
+        .and_then(|settings| direct_child_text(settings, "Enabled"));
+    let enabled = match enabled_value.as_deref() {
+        None => EnabledState::Enabled,
+        Some(value) if value.eq_ignore_ascii_case("true") => EnabledState::Enabled,
+        Some(value) if value.eq_ignore_ascii_case("false") => EnabledState::Disabled,
+        Some(_) => {
+            job.parse_warnings.push(warning(
+                "windows.enabled",
+                "Enabled has an invalid value",
+                &source,
+            ));
+            EnabledState::Unknown
+        }
+    };
+    job.enabled = Evidence::available(enabled, provenance.clone());
 
     let exec_actions = task
         .descendants()
@@ -225,15 +234,31 @@ pub fn enrich_runtime_json(
             continue;
         };
         let provenance = provenance(source);
-        if let Some(next_run) = record.next_run_time.as_deref().and_then(normalise_runtime) {
-            job.next_run = Evidence::available(next_run, provenance.clone());
+        if let Some(next_run_time) = record.next_run_time.as_deref() {
+            if let Some(next_run) = normalise_runtime(next_run_time) {
+                job.next_run = Evidence::available(next_run, provenance.clone());
+            } else {
+                job.parse_warnings.push(warning(
+                    "windows.nextRunTime",
+                    "NextRunTime was not valid RFC3339",
+                    source,
+                ));
+            }
         }
         let last_run = record.last_run_time.as_deref().and_then(normalise_runtime);
+        if record.last_run_time.is_some() && last_run.is_none() {
+            job.parse_warnings.push(warning(
+                "windows.lastRunTime",
+                "LastRunTime was not valid RFC3339",
+                source,
+            ));
+        }
+        let had_last_run = last_run.is_some();
         if let Some(last_run) = last_run {
             job.last_run = Evidence::available(last_run, provenance.clone());
         }
         let running = record.state.eq_ignore_ascii_case("running");
-        if running || record.last_run_time.is_some() {
+        if running || had_last_run {
             job.last_outcome = Evidence::available(
                 LastOutcome {
                     state: if running {

@@ -1,43 +1,42 @@
 use chrono::Utc;
+use jobglass_lib::adapters::cron;
 use jobglass_lib::diagnostics::diagnose;
-use jobglass_lib::model::{
-    Evidence, JobScope, ScheduleKind, ScheduleSpec, ScheduledJob, SchedulerKind,
-};
+use jobglass_lib::model::JobScope;
 use std::time::{Duration, Instant};
 
 fn main() {
-    let started = Instant::now();
-    let jobs = (0..5_000)
+    let fixture = (0..5_000)
         .map(|index| {
-            let source = format!("fixture:{index}");
-            let mut job = ScheduledJob::new(
-                SchedulerKind::Cron,
-                format!("fixture-{index}"),
-                format!("Fixture {index}"),
-                JobScope::User,
-                &source,
-            );
-            let provenance = match &job.schedule {
-                Evidence::Available { provenance, .. }
-                | Evidence::Unavailable { provenance, .. } => provenance.clone(),
-            };
-            job.schedule = Evidence::available(
-                ScheduleSpec {
-                    kind: ScheduleKind::Calendar,
-                    native_expression: format!("{} * * * *", index % 60),
-                },
-                provenance.clone(),
-            );
-            job.executable = Evidence::available(format!("fixture-tool-{index}"), provenance);
-            job
+            format!(
+                "{} * * * * FIXTURE_KEY=value /usr/bin/jobglass-fixture-{index} --quiet",
+                index % 60
+            )
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+        .join("\n");
+    let started = Instant::now();
+    let normalised = cron::parse_crontab(
+        &fixture,
+        "5,000-job benchmark fixture",
+        JobScope::User,
+        Some("fixture-user"),
+        false,
+    );
+    assert!(normalised.warnings.is_empty(), "{:?}", normalised.warnings);
+    assert_eq!(normalised.jobs.len(), 5_000);
 
-    let findings = diagnose(&jobs, &[], &[], Utc::now(), |_| true, |_| true);
+    let findings = diagnose(
+        &normalised.jobs,
+        &normalised.warnings,
+        &[],
+        Utc::now(),
+        |_| true,
+        |_| true,
+    );
     let elapsed = started.elapsed();
     println!(
-        "normalised and diagnosed {} fixture jobs with {} findings in {elapsed:?}",
-        jobs.len(),
+        "parsed, normalised, and diagnosed {} fixture jobs with {} findings in {elapsed:?}",
+        normalised.jobs.len(),
         findings.len()
     );
     assert!(

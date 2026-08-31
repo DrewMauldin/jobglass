@@ -240,7 +240,8 @@ fn finding(
     job_ids.sort();
     evidence.sort();
     let mut hasher = Sha256::new();
-    for part in std::iter::once(code)
+    for part in [code, title, explanation]
+        .into_iter()
         .chain(job_ids.iter().map(String::as_str))
         .chain(evidence.iter().map(String::as_str))
     {

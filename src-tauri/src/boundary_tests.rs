@@ -1,12 +1,16 @@
 use crate::input::{
-    BoundaryError, MAX_INPUT_BYTES, decode_bounded, local_directory_exists,
-    local_executable_exists, read_bounded_file, read_bounded_file_bytes, validate_directory_root,
+    BoundaryError, MAX_INPUT_BYTES, decode_bounded, read_bounded_file, read_bounded_file_bytes,
 };
-use crate::process::{
-    MAX_OUTPUT_BYTES, NativeTool, decode_native_output_for_test, run_program_for_test,
+#[cfg(unix)]
+use crate::input::{
+    current_user_home, local_directory_exists, local_executable_exists, validate_directory_root,
 };
+#[cfg(unix)]
+use crate::process::{MAX_OUTPUT_BYTES, run_program_for_test};
+use crate::process::{NativeTool, decode_native_output_for_test};
 use proptest::prelude::*;
 use std::path::Path;
+#[cfg(unix)]
 use std::time::Duration;
 
 #[test]
@@ -67,6 +71,31 @@ fn rejects_symlink_inputs() {
 
 #[cfg(unix)]
 #[test]
+fn rejects_a_symlink_in_any_parent_component() {
+    use std::os::unix::fs::symlink;
+
+    let allowed = tempfile::tempdir().expect("allowed temp directory");
+    let outside = tempfile::tempdir().expect("outside temp directory");
+    std::fs::write(outside.path().join("definition"), "secret fixture")
+        .expect("outside fixture write");
+    let linked_directory = allowed.path().join("linked");
+    symlink(outside.path(), &linked_directory).expect("parent symlink");
+
+    assert!(matches!(
+        read_bounded_file(&linked_directory.join("definition"), &[allowed.path()]),
+        Err(BoundaryError::SymlinkRejected)
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn current_home_is_derived_from_the_process_identity() {
+    let home = current_user_home().expect("current user home directory");
+    assert!(home.is_absolute());
+}
+
+#[cfg(unix)]
+#[test]
 fn rejects_symlinked_roots_and_path_probe_type_confusion() {
     use std::os::unix::fs::{PermissionsExt, symlink};
 
@@ -114,13 +143,11 @@ fn rejects_symlinked_roots_and_path_probe_type_confusion() {
 
 #[test]
 fn native_tools_resolve_to_fixed_absolute_paths() {
-    for tool in [
-        NativeTool::Launchctl,
-        NativeTool::Crontab,
-        NativeTool::Systemctl,
-        NativeTool::Schtasks,
-        NativeTool::PowerShell,
-    ] {
+    #[cfg(unix)]
+    let tools = [NativeTool::Launchctl, NativeTool::Systemctl].as_slice();
+    #[cfg(windows)]
+    let tools = [NativeTool::Schtasks, NativeTool::PowerShell].as_slice();
+    for tool in tools {
         let program = tool.program().expect("fixed native tool path");
         assert!(Path::new(&program).is_absolute(), "{program:?}");
     }

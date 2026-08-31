@@ -172,7 +172,10 @@ fn scheduler_name(scheduler: &SchedulerKind) -> String {
 }
 
 fn csv_escape(value: &str) -> String {
-    let neutralised = if value.starts_with(['=', '+', '-', '@']) {
+    let neutralised = if value
+        .trim_start_matches(char::is_whitespace)
+        .starts_with(['=', '+', '-', '@'])
+    {
         format!("'{value}")
     } else {
         value.to_owned()

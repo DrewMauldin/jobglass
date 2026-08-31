@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use jobglass_lib::adapters::{cron, launchd, systemd, windows};
 use jobglass_lib::diagnostics::{Visibility, VisibilityStatus, diagnose};
 use jobglass_lib::model::{
-    EnabledState, Evidence, JobScope, OutcomeState, ParseWarning, ScheduleKind,
+    EnabledState, Evidence, JobScope, OutcomeState, ParseWarning, PrivilegeLevel, ScheduleKind,
 };
 use std::path::PathBuf;
 
@@ -127,6 +127,88 @@ fn cron_variants_keep_environment_keys_and_report_bad_lines() {
 }
 
 #[test]
+fn cron_inline_environment_values_never_enter_the_job_model() {
+    let result = cron::parse_crontab(
+        "0 2 * * * API_TOKEN='fixture secret' SAFE_KEY=value /usr/bin/backup --quiet\n",
+        "sensitive cron fixture",
+        JobScope::User,
+        Some("fixture-user"),
+        false,
+    );
+
+    assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    assert_eq!(result.jobs.len(), 1);
+    assert_eq!(value(&result.jobs[0].executable), "/usr/bin/backup");
+    assert_eq!(
+        value(&result.jobs[0].environment_keys),
+        &["API_TOKEN", "SAFE_KEY"]
+    );
+    let serialised = serde_json::to_string(&result.jobs[0]).expect("serialise cron job");
+    assert!(!serialised.contains("fixture secret"));
+    assert!(!serialised.contains("SAFE_KEY=value"));
+}
+
+#[test]
+fn launchd_omits_invalid_environment_keys_without_echoing_them() {
+    let input = br#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.jobglass.invalid-environment</string>
+  <key>Program</key><string>/usr/bin/true</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>SAFE_KEY</key><string>safe</string>
+    <key>SECRET=fixture-secret</key><string>ignored</string>
+  </dict>
+</dict></plist>"#;
+    let job = launchd::parse_plist(input, "invalid environment fixture", JobScope::User)
+        .expect("parse launchd fixture");
+
+    assert_eq!(value(&job.environment_keys), &["SAFE_KEY"]);
+    assert_eq!(job.parse_warnings.len(), 1);
+    let serialised = serde_json::to_string(&job).expect("serialise launchd job");
+    assert!(!serialised.contains("fixture-secret"));
+}
+
+#[test]
+fn malformed_native_state_values_remain_unknown_and_warn() {
+    let launchd_input = fixture("macos/launchd-backup.plist").replace(
+        "<key>Label</key>",
+        "<key>Disabled</key><string>invalid</string><key>Label</key>",
+    );
+    let launchd_job = launchd::parse_plist(
+        launchd_input.as_bytes(),
+        "invalid launchd state",
+        JobScope::User,
+    )
+    .expect("parse malformed launchd state");
+    assert_eq!(value(&launchd_job.enabled), &EnabledState::Unknown);
+    assert!(
+        launchd_job
+            .parse_warnings
+            .iter()
+            .any(|warning| warning.code == "launchd.disabled")
+    );
+
+    let windows_input = fixture("windows/backup-task.xml")
+        .replace(
+            "<RunLevel>LeastPrivilege</RunLevel>",
+            "<RunLevel>invalid</RunLevel>",
+        )
+        .replace(
+            "<Settings><Enabled>false</Enabled>",
+            "<Settings><Enabled>invalid</Enabled>",
+        );
+    let windows_job = windows::parse_task_xml(windows_input.as_bytes(), "invalid Windows state")
+        .expect("parse malformed Windows state");
+    assert_eq!(value(&windows_job.enabled), &EnabledState::Unknown);
+    assert_eq!(
+        value(&windows_job.privilege_level),
+        &PrivilegeLevel::Unknown
+    );
+    assert_eq!(windows_job.parse_warnings.len(), 2);
+}
+
+#[test]
 fn cron_rejects_out_of_range_fields_and_unknown_nicknames() {
     let result = cron::parse_crontab(
         "99 99 99 99 99 /bin/true\n@bogus /bin/true\n",
@@ -162,6 +244,30 @@ fn systemd_timer_preserves_calendar_and_monotonic_evidence() {
     assert!(systemd::valid_timer_identifier("backup.timer"));
     assert!(!systemd::valid_timer_identifier("--host=remote.timer"));
     assert!(!systemd::valid_timer_identifier("../../remote.timer"));
+}
+
+#[test]
+fn invalid_runtime_timestamps_are_explicit_parse_warnings() {
+    let systemd_input = fixture("linux/systemd/backup.timer.show")
+        .replace("Mon 2026-08-31 03:30:00 UTC", "invalid-next")
+        .replace("Sun 2026-08-30 03:30:00 UTC", "invalid-last");
+    let systemd_job = systemd::parse_timer_show(&systemd_input, JobScope::System)
+        .expect("parse malformed systemd timestamps");
+    assert_eq!(systemd_job.parse_warnings.len(), 2);
+
+    let mut windows_result = windows::parse_task_xml_collection(
+        &fixture_bytes("windows/multiple-tasks.xml"),
+        "Task Scheduler collection",
+    );
+    let runtime = fixture("windows/runtime.json").replace("2026-09-01T04:00:00Z", "invalid-next");
+    windows::enrich_runtime_json(&mut windows_result.jobs, &runtime, "invalid runtime query")
+        .expect("parse runtime JSON");
+    assert!(
+        windows_result.jobs[0]
+            .parse_warnings
+            .iter()
+            .any(|warning| warning.code == "windows.nextRunTime")
+    );
 }
 
 #[test]

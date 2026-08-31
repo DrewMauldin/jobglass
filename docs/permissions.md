@@ -16,7 +16,7 @@ It runs fixed, bounded `launchctl print` queries for the current GUI and system 
 
 ## Linux
 
-JobGlass reads allowlisted cron definitions and makes fixed read-only invocations of `crontab` and `systemctl`. User and system systemd managers are queried separately. It does not inspect unrelated logs to invent cron success history.
+JobGlass reads allowlisted system cron definitions and makes fixed read-only `systemctl` queries. It deliberately does not invoke the privilege-bearing `crontab` helper, so user-crontab visibility is reported as unavailable. User and system systemd managers are queried separately. It does not inspect unrelated logs to invent cron success history.
 
 ## Windows
 

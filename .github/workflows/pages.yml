@@ -55,7 +55,9 @@ jobs:
         shell: bash
         run: |
           site_url=${PAGE_URL%/}
-          page=$(curl --fail --location --retry 5 --retry-all-errors --retry-delay 5 "$site_url/")
+          case "$site_url" in https://*) ;; *) echo "Pages URL is not HTTPS" >&2; exit 1;; esac
+          curl_args=(--fail --location --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 30 --retry 5 --retry-all-errors --retry-delay 5)
+          page=$(curl "${curl_args[@]}" "$site_url/")
           grep -F 'https://github.com/DrewMauldin/jobglass/releases' <<<"$page"
-          curl --fail --location --retry 5 --retry-all-errors --retry-delay 5 --output /dev/null "$site_url/media/jobglass-light.png"
-          curl --fail --location --retry 5 --retry-all-errors --retry-delay 5 --output /dev/null "$site_url/media/jobglass-export-review.png"
+          curl "${curl_args[@]}" --output /dev/null "$site_url/media/jobglass-light.png"
+          curl "${curl_args[@]}" --output /dev/null "$site_url/media/jobglass-export-review.png"

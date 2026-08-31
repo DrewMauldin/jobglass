@@ -13,7 +13,6 @@ pub const MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
 #[derive(Debug, Clone, Copy)]
 pub enum NativeTool {
     Launchctl,
-    Crontab,
     Systemctl,
     Schtasks,
     PowerShell,
@@ -23,7 +22,6 @@ impl NativeTool {
     pub(crate) fn program(self) -> Result<PathBuf, BoundaryError> {
         match self {
             Self::Launchctl => Ok(PathBuf::from("/bin/launchctl")),
-            Self::Crontab => Ok(PathBuf::from("/usr/bin/crontab")),
             Self::Systemctl => Ok(PathBuf::from("/usr/bin/systemctl")),
             Self::Schtasks => windows_system_tool("schtasks.exe"),
             Self::PowerShell => windows_system_tool("WindowsPowerShell/v1.0/powershell.exe"),
@@ -45,7 +43,6 @@ pub fn run_native_tool(
 ) -> Result<NativeOutput, BoundaryError> {
     let environment = match tool {
         NativeTool::Systemctl => &[("LC_ALL", "C"), ("TZ", "UTC")][..],
-        NativeTool::Crontab => &[("LC_ALL", "C")][..],
         _ => &[][..],
     };
     run_program(&tool.program()?, arguments, timeout, environment)
@@ -57,12 +54,25 @@ fn run_program(
     timeout: Duration,
     environment: &[(&str, &str)],
 ) -> Result<NativeOutput, BoundaryError> {
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(arguments)
         .envs(environment.iter().copied())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        command.pre_exec(|| {
+            if libc::setpgid(0, 0) == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+    let mut child = command
         .spawn()
         .map_err(|error| BoundaryError::ProcessSpawn(error.to_string()))?;
 
@@ -83,10 +93,10 @@ fn run_program(
     {
         Some(status) => status,
         None => {
-            child
-                .kill()
-                .map_err(|error| BoundaryError::ProcessRead(error.to_string()))?;
+            terminate_child_tree(&mut child);
             let _ = child.wait();
+            let _ = join_reader(stdout_reader);
+            let _ = join_reader(stderr_reader);
             return Err(BoundaryError::ProcessTimeout);
         }
     };
@@ -104,6 +114,14 @@ fn run_program(
         stdout: decode_native_output(stdout)?,
         stderr: decode_native_output(stderr)?,
     })
+}
+
+fn terminate_child_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    unsafe {
+        let _ = libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
+    let _ = child.kill();
 }
 
 fn decode_native_output(bytes: Vec<u8>) -> Result<String, BoundaryError> {
@@ -177,7 +195,7 @@ fn join_reader(
         .map_err(|error| BoundaryError::ProcessRead(error.to_string()))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn run_program_for_test(
     program: &str,
     arguments: &[&str],

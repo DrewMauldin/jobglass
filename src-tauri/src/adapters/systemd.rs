@@ -107,16 +107,30 @@ pub fn parse_timer_show(input: &str, scope: JobScope) -> Result<ScheduledJob, Pa
     if let Some(next) = properties
         .get("NextElapseUSecRealtime")
         .filter(|value| !value.is_empty())
-        && let Some(run) = normalise_timestamp(next)
     {
-        job.next_run = Evidence::available(run, provenance.clone());
+        if let Some(run) = normalise_timestamp(next) {
+            job.next_run = Evidence::available(run, provenance.clone());
+        } else if !next.eq_ignore_ascii_case("n/a") {
+            job.parse_warnings.push(warning(
+                "systemd.nextRunTime",
+                "NextElapseUSecRealtime had an invalid timestamp",
+                &source,
+            ));
+        }
     }
     if let Some(last) = properties
         .get("LastTriggerUSec")
         .filter(|value| !value.is_empty())
-        && let Some(run) = normalise_timestamp(last)
     {
-        job.last_run = Evidence::available(run, provenance.clone());
+        if let Some(run) = normalise_timestamp(last) {
+            job.last_run = Evidence::available(run, provenance.clone());
+        } else if !last.eq_ignore_ascii_case("n/a") {
+            job.parse_warnings.push(warning(
+                "systemd.lastRunTime",
+                "LastTriggerUSec had an invalid timestamp",
+                &source,
+            ));
+        }
     }
     if let Some(result) = properties.get("Result").filter(|value| !value.is_empty()) {
         let state = match *result {
