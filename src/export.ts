@@ -29,10 +29,7 @@ export function renderBrowserExport(
   const findings = bundle.findings.map((finding) => ({
     ...finding,
     evidence: finding.evidence.map((item) =>
-      argumentsToRedact.reduce(
-        (redacted, argument) => redacted.replaceAll(argument, "<redacted>"),
-        item,
-      ),
+      redactArguments(item, argumentsToRedact),
     ),
   }));
   if (format === "json")
@@ -76,6 +73,17 @@ export function renderBrowserExport(
   const findingCount = String(bundle.findings.length);
   const findingLabel = bundle.findings.length === 1 ? "finding" : "findings";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><meta name="viewport" content="width=device-width"><title>JobGlass report</title><style>body{font:15px system-ui;margin:2rem;color:#17201c}table{border-collapse:collapse;width:100%}th,td{border:1px solid #cad1cc;padding:.6rem;text-align:left;vertical-align:top}th{background:#edf2ee}caption{font-size:1.5rem;font-weight:700;text-align:left;margin-bottom:1rem}</style></head><body><main><table><caption>JobGlass scheduler report</caption><thead><tr><th>ID</th><th>Scheduler</th><th>Name</th><th>Schedule</th><th>Executable</th><th>Arguments</th></tr></thead><tbody>${rows}</tbody></table><p>${findingCount} diagnostic ${findingLabel}. Environment values are never represented.</p></main></body></html>`;
+}
+
+function redactArguments(value: string, argumentsToRedact: string[]): string {
+  if (argumentsToRedact.length === 0) return value;
+  const pattern = new RegExp(
+    argumentsToRedact
+      .map((argument) => argument.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|"),
+    "g",
+  );
+  return value.replace(pattern, "<redacted>");
 }
 
 function exportEvidenceText<T>(

@@ -195,6 +195,41 @@ describe("JobGlass desktop experience", () => {
     expect(csv).not.toContain('"=sensitive name"');
   });
 
+  it("does not redact inside its own replacement marker", () => {
+    const firstJob = demoBundle.jobs[0];
+    const firstFinding = demoBundle.findings[0];
+    if (!firstJob) throw new Error("demo fixture must contain a job");
+    if (!firstFinding) throw new Error("demo fixture must contain a finding");
+    const bundle = {
+      ...demoBundle,
+      jobs: [
+        {
+          ...firstJob,
+          arguments: {
+            ...firstJob.arguments,
+            availability: "available" as const,
+            value: ["a"],
+          },
+        },
+      ],
+      findings: [
+        {
+          ...firstFinding,
+          evidence: ["[a]"],
+        },
+      ],
+    };
+
+    const parsed = JSON.parse(
+      renderBrowserExport(bundle, "json", {
+        reviewed: true,
+        includeArguments: false,
+      }),
+    ) as { findings: { evidence: string[] }[] };
+
+    expect(parsed.findings[0]?.evidence).toEqual(["[<redacted>]"]);
+  });
+
   it("blocks export until privacy review is acknowledged", async () => {
     const user = userEvent.setup();
     const exporter = vi.fn(() => Promise.resolve("report"));
