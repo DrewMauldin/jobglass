@@ -8,6 +8,10 @@ export default tseslint.config(
   { ignores: ["dist", "coverage", "playwright-report", "src-tauri/target"] },
   eslint.configs.recommended,
   {
+    files: ["eslint.config.js", "scripts/**/*.{js,mjs}"],
+    languageOptions: { globals: globals.node },
+  },
+  {
     files: ["**/*.{ts,tsx}"],
     extends: [
       ...tseslint.configs.strictTypeChecked,

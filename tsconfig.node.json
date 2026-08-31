@@ -3,7 +3,7 @@
     "composite": true,
     "skipLibCheck": false,
     "target": "ESNext",
-    "lib": ["ESNext"],
+    "lib": ["ESNext", "DOM"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "allowSyntheticDefaultImports": true,
@@ -15,6 +15,7 @@
     "vite.config.ts",
     "vitest.config.ts",
     "playwright.config.ts",
+    "tests/e2e/**/*.ts",
     "eslint.config.js"
   ]
 }

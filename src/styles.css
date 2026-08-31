@@ -20,6 +20,7 @@
   --accent: #246b58;
   --accent-strong: #155342;
   --accent-soft: #e4f1ec;
+  --primary-bg: #155342;
   --warning: #95651d;
   --warning-soft: #fff3d6;
   --error: #a13a3a;
@@ -45,6 +46,7 @@
   --accent: #78c4ae;
   --accent-strong: #9fdbc9;
   --accent-soft: #203b33;
+  --primary-bg: #246b58;
   --warning: #e1b969;
   --warning-soft: #493a20;
   --error: #ed9797;
@@ -69,6 +71,7 @@
     --accent: #78c4ae;
     --accent-strong: #9fdbc9;
     --accent-soft: #203b33;
+    --primary-bg: #246b58;
     --warning: #e1b969;
     --warning-soft: #493a20;
     --error: #ed9797;
@@ -239,8 +242,8 @@ svg {
   height: 1rem;
 }
 .button-primary {
-  border-color: var(--accent-strong);
-  background: var(--accent-strong);
+  border-color: var(--primary-bg);
+  background: var(--primary-bg);
   color: #fff;
 }
 .button:not(:disabled):hover {
@@ -619,7 +622,7 @@ svg {
 }
 .job-primary code {
   overflow: hidden;
-  color: var(--faint);
+  color: var(--muted);
   font-size: 0.62rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1090,13 +1093,14 @@ svg {
 
 @media (max-width: 760px) {
   .topbar {
+    flex-wrap: wrap;
+    gap: 0.5rem;
     height: auto;
     min-height: 4rem;
     padding: 0.65rem;
   }
   .brand-lockup span,
-  .local-status,
-  .theme-control {
+  .local-status {
     display: none;
   }
   .workspace {
@@ -1157,6 +1161,13 @@ svg {
   }
   .export-actions {
     flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 480px) {
+  .topbar-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 }
 

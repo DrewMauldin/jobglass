@@ -242,3 +242,36 @@ export const demoBundle: ScanBundle = {
   ],
   sampleData: true,
 };
+
+export function largeDemoBundle(count: number): ScanBundle {
+  if (!Number.isInteger(count) || count < 1 || count > 10_000) {
+    throw new RangeError(
+      "fixture job count must be an integer from 1 to 10,000",
+    );
+  }
+
+  const largeJobs = Array.from({ length: count }, (_, index) => {
+    const template = jobs[index % jobs.length];
+    if (!template) throw new Error("browser fixture templates are unavailable");
+    const suffix = String(index + 1).padStart(5, "0");
+    const sourceReference = `browser fixture:${suffix}`;
+    const source = { ...template.nativeSource.provenance, sourceReference };
+    return {
+      ...template,
+      id: `fixture_job_${suffix}`,
+      nativeIdentifier: available(`fixture.job.${suffix}`, source),
+      displayName: available(`Fixture job ${suffix}`, source),
+      nativeSource: available(
+        { sourceType: "nativeDefinition" as const, reference: sourceReference },
+        source,
+      ),
+    };
+  });
+
+  return {
+    ...demoBundle,
+    scanId: `browser-fixture-${String(count)}`,
+    jobs: largeJobs,
+    findings: [],
+  };
+}

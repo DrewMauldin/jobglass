@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "vite",
+    "preview": "vite preview",
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -20,9 +21,10 @@
     "format:check": "prettier --check .",
     "size": "node scripts/check-bundle-size.mjs",
     "floor": "node scripts/floor-guard.mjs",
-    "check:fast": "npm run typecheck && npm run lint && npm run format:check",
+    "check:fast": "npm run typecheck && npm run lint && npm run format:check && npm run floor",
     "check:task": "npm run check:fast && npm run test && npm run build",
     "check:full": "npm run check:task && npm run test:e2e && npm run size",
+    "quality": "scripts/quality.sh",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"

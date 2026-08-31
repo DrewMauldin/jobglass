@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { demoBundle } from "./data/demo";
+import { demoBundle, largeDemoBundle } from "./data/demo";
 import type {
   Evidence,
   ExportFormat,
@@ -43,6 +43,14 @@ export function App({
   const [reviewed, setReviewed] = useState(false);
   const [includeArguments, setIncludeArguments] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const exportButtonRef = useRef<HTMLButtonElement>(null);
+
+  const closeExport = useCallback(() => {
+    setExportOpen(false);
+    queueMicrotask(() => {
+      exportButtonRef.current?.focus();
+    });
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -149,6 +157,7 @@ export function App({
             </select>
           </label>
           <button
+            ref={exportButtonRef}
             className="button button-primary"
             type="button"
             onClick={() => {
@@ -364,9 +373,7 @@ export function App({
           onReviewed={setReviewed}
           onIncludeArguments={setIncludeArguments}
           onPrepare={(format) => void prepareExport(format)}
-          onClose={() => {
-            setExportOpen(false);
-          }}
+          onClose={closeExport}
         />
       )}
     </div>
@@ -683,9 +690,48 @@ function ExportReview({
   onPrepare: (format: ExportFormat) => void;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    const focusable = () =>
+      Array.from(
+        dialog?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+    focusable()[0]?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const elements = focusable();
+      const first = elements[0];
+      const last = elements.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
+        ref={dialogRef}
         className="export-dialog"
         role="dialog"
         aria-modal="true"
@@ -872,6 +918,8 @@ function findingJobNames(
 async function loadBundle(): Promise<ScanBundle> {
   if (isTauri()) return invoke<ScanBundle>("scan_jobs");
   await Promise.resolve();
+  if (new URLSearchParams(window.location.search).get("fixtureJobs") === "5000")
+    return largeDemoBundle(5_000);
   return demoBundle;
 }
 async function renderExport(
