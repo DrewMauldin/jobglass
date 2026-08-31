@@ -32,15 +32,28 @@ pub enum BoundaryError {
 }
 
 pub fn decode_bounded(input: &[u8]) -> Result<&str, BoundaryError> {
+    validate_bounded_bytes(input)?;
+    std::str::from_utf8(input).map_err(|_| BoundaryError::InvalidEncoding)
+}
+
+pub fn validate_bounded_bytes(input: &[u8]) -> Result<(), BoundaryError> {
     if input.len() > MAX_INPUT_BYTES {
         return Err(BoundaryError::InputTooLarge {
             limit: MAX_INPUT_BYTES,
         });
     }
-    std::str::from_utf8(input).map_err(|_| BoundaryError::InvalidEncoding)
+    Ok(())
 }
 
 pub fn read_bounded_file(path: &Path, allowed_roots: &[&Path]) -> Result<String, BoundaryError> {
+    let bytes = read_bounded_file_bytes(path, allowed_roots)?;
+    Ok(decode_bounded(&bytes)?.to_owned())
+}
+
+pub fn read_bounded_file_bytes(
+    path: &Path,
+    allowed_roots: &[&Path],
+) -> Result<Vec<u8>, BoundaryError> {
     let initial_metadata = std::fs::symlink_metadata(path)
         .map_err(|error| BoundaryError::FileRead(error.to_string()))?;
     if initial_metadata.file_type().is_symlink() {
@@ -76,7 +89,8 @@ pub fn read_bounded_file(path: &Path, allowed_roots: &[&Path]) -> Result<String,
         .take((MAX_INPUT_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|error| BoundaryError::FileRead(error.to_string()))?;
-    Ok(decode_bounded(&bytes)?.to_owned())
+    validate_bounded_bytes(&bytes)?;
+    Ok(bytes)
 }
 
 fn enforce_input_size(size: u64) -> Result<(), BoundaryError> {

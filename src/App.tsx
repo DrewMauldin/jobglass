@@ -35,7 +35,8 @@ export function App({
   const [query, setQuery] = useState("");
   const [scheduler, setScheduler] = useState<"all" | SchedulerKind>("all");
   const [view, setView] = useState<ViewMode>("list");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(100);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>("system");
   const [showFindings, setShowFindings] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -49,7 +50,9 @@ export function App({
       .then((nextBundle) => {
         if (!active) return;
         setBundle(nextBundle);
-        setSelectedId(nextBundle.jobs[0]?.id ?? null);
+        setSelectedKey(
+          nextBundle.jobs[0] ? jobUiKey(nextBundle.jobs[0]) : null,
+        );
         setLoading(false);
       })
       .catch((reason: unknown) => {
@@ -88,16 +91,15 @@ export function App({
   }, [bundle, query, scheduler]);
 
   const selectedJob =
-    bundle?.jobs.find((job) => job.id === selectedId) ??
+    bundle?.jobs.find((job) => jobUiKey(job) === selectedKey) ??
     filteredJobs[0] ??
     null;
   const selectedFindings = bundle
     ? bundle.findings.filter(
-        (finding) =>
-          finding.jobIds.length === 0 ||
-          (selectedJob && finding.jobIds.includes(selectedJob.id)),
+        (finding) => selectedJob && finding.jobIds.includes(selectedJob.id),
       )
     : [];
+  const visibleJobs = filteredJobs.slice(0, visibleCount);
 
   async function prepareExport(format: ExportFormat) {
     if (!bundle || !reviewed) return;
@@ -250,6 +252,7 @@ export function App({
                           value={query}
                           onChange={(event) => {
                             setQuery(event.target.value);
+                            setVisibleCount(100);
                           }}
                         />
                       </label>
@@ -261,6 +264,7 @@ export function App({
                             setScheduler(
                               event.target.value as "all" | SchedulerKind,
                             );
+                            setVisibleCount(100);
                           }}
                         >
                           <option value="all">All schedulers</option>
@@ -321,13 +325,27 @@ export function App({
                       </div>
                     ) : view === "list" ? (
                       <JobList
-                        jobs={filteredJobs}
+                        jobs={visibleJobs}
                         findings={bundle.findings}
-                        selectedId={selectedJob?.id ?? null}
-                        onSelect={setSelectedId}
+                        selectedKey={selectedJob ? jobUiKey(selectedJob) : null}
+                        onSelect={setSelectedKey}
                       />
                     ) : (
-                      <Timeline jobs={filteredJobs} onSelect={setSelectedId} />
+                      <Timeline jobs={visibleJobs} onSelect={setSelectedKey} />
+                    )}
+                    {visibleCount < filteredJobs.length && (
+                      <button
+                        className="load-more"
+                        type="button"
+                        onClick={() => {
+                          setVisibleCount((count) => count + 100);
+                        }}
+                      >
+                        Show 100 more jobs
+                        <span>
+                          Showing {visibleJobs.length} of {filteredJobs.length}
+                        </span>
+                      </button>
                     )}
                   </div>
                   <Inspector job={selectedJob} findings={selectedFindings} />
@@ -414,12 +432,12 @@ function VisibilityPill({ bundle }: { bundle: ScanBundle }) {
 function JobList({
   jobs,
   findings,
-  selectedId,
+  selectedKey,
   onSelect,
 }: {
   jobs: readonly ScheduledJob[];
   findings: readonly Finding[];
-  selectedId: string | null;
+  selectedKey: string | null;
   onSelect: (id: string) => void;
 }) {
   return (
@@ -432,10 +450,12 @@ function JobList({
         return (
           <button
             type="button"
-            className={job.id === selectedId ? "job-row selected" : "job-row"}
-            key={job.id}
+            className={
+              jobUiKey(job) === selectedKey ? "job-row selected" : "job-row"
+            }
+            key={jobUiKey(job)}
             onClick={() => {
-              onSelect(job.id);
+              onSelect(jobUiKey(job));
             }}
             aria-label={`${name}, ${schedulerLabel(evidence(job.scheduler))}`}
           >
@@ -485,9 +505,9 @@ function Timeline({
         {known.map((job, index) => (
           <button
             type="button"
-            key={job.id}
+            key={jobUiKey(job)}
             onClick={() => {
-              onSelect(job.id);
+              onSelect(jobUiKey(job));
             }}
           >
             <span className="timeline-time">{formatRun(job.nextRun)}</span>
@@ -507,9 +527,9 @@ function Timeline({
           {unknown.map((job) => (
             <button
               type="button"
-              key={job.id}
+              key={jobUiKey(job)}
               onClick={() => {
-                onSelect(job.id);
+                onSelect(jobUiKey(job));
               }}
             >
               {evidence(job.displayName)}{" "}
@@ -831,6 +851,10 @@ function schedulerMonogram(scheduler: SchedulerKind | null): string {
   return scheduler === "windowsTaskScheduler"
     ? "TS"
     : (scheduler?.slice(0, 2).toUpperCase() ?? "?");
+}
+
+function jobUiKey(job: ScheduledJob): string {
+  return `${job.id}:${job.nativeSource.provenance.sourceReference}`;
 }
 
 function findingJobNames(

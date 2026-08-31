@@ -1,0 +1,6 @@
+gui/501 = {
+    services = {
+        0      0  com.jobglass.fixture.backup
+        4242   -  com.jobglass.fixture.running
+    }
+}

@@ -3,7 +3,7 @@ use std::io::Cursor;
 use plist::{Dictionary, Value};
 
 use crate::adapters::warning;
-use crate::input::decode_bounded;
+use crate::input::validate_bounded_bytes;
 use crate::model::{
     EnabledState, Evidence, JobScope, LastOutcome, OutcomeState, ParseWarning, Provenance,
     ScheduleKind, ScheduleSpec, ScheduledJob, SchedulerKind, TimezoneBasis, Trigger,
@@ -14,8 +14,9 @@ pub fn parse_plist(
     source: &str,
     scope: JobScope,
 ) -> Result<ScheduledJob, ParseWarning> {
-    decode_bounded(input).map_err(|error| warning("launchd.input", error.to_string(), source))?;
-    let value = Value::from_reader_xml(Cursor::new(input))
+    validate_bounded_bytes(input)
+        .map_err(|error| warning("launchd.input", error.to_string(), source))?;
+    let value = Value::from_reader(Cursor::new(input))
         .map_err(|error| warning("launchd.xml", error.to_string(), source))?;
     let dictionary = value.as_dictionary().ok_or_else(|| {
         warning(
@@ -151,6 +152,51 @@ pub fn enrich_launchctl(job: &mut ScheduledJob, output: &str) {
             provenance,
         );
     }
+}
+
+pub fn enrich_launchctl_domain(job: &mut ScheduledJob, output: &str) {
+    let (label, provenance) = match &job.native_identifier {
+        Evidence::Available { value, provenance } => (
+            value,
+            Provenance {
+                detail: Some("launchctl domain service table".into()),
+                ..provenance.clone()
+            },
+        ),
+        Evidence::Unavailable { .. } => return,
+    };
+    let fields = output.lines().find_map(|line| {
+        let fields = line.split_whitespace().collect::<Vec<_>>();
+        (fields.len() >= 3 && fields.last() == Some(&label.as_str())).then_some(fields)
+    });
+    let Some(fields) = fields else { return };
+    let pid = fields[0].parse::<u32>().ok();
+    let native_code = fields[1].parse::<i64>().ok();
+    let (state, explanation) = if pid.is_some_and(|value| value > 0) {
+        (
+            OutcomeState::Running,
+            "launchctl domain table reports that the job is running".into(),
+        )
+    } else if let Some(code) = native_code {
+        (
+            if code == 0 {
+                OutcomeState::Success
+            } else {
+                OutcomeState::Failed
+            },
+            format!("launchctl domain table reports exit code {code}"),
+        )
+    } else {
+        return;
+    };
+    job.last_outcome = Evidence::available(
+        LastOutcome {
+            state,
+            native_code,
+            explanation,
+        },
+        provenance,
+    );
 }
 
 fn launchd_triggers(dictionary: &Dictionary) -> Vec<Trigger> {

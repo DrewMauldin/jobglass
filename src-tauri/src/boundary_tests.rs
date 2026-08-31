@@ -1,4 +1,6 @@
-use crate::input::{BoundaryError, MAX_INPUT_BYTES, decode_bounded, read_bounded_file};
+use crate::input::{
+    BoundaryError, MAX_INPUT_BYTES, decode_bounded, read_bounded_file, read_bounded_file_bytes,
+};
 use crate::process::{MAX_OUTPUT_BYTES, run_program_for_test};
 use proptest::prelude::*;
 use std::time::Duration;
@@ -23,6 +25,22 @@ fn rejects_files_outside_an_allowlisted_root() {
     assert!(matches!(
         read_bounded_file(outside.path(), &[allowed.path()]),
         Err(BoundaryError::PathNotAllowed)
+    ));
+}
+
+#[test]
+fn bounded_binary_reader_does_not_require_text_encoding() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("binary.plist");
+    std::fs::write(&path, [0xff, 0x00, 0x01]).expect("binary fixture write");
+
+    assert_eq!(
+        read_bounded_file_bytes(&path, &[directory.path()]).expect("bounded binary read"),
+        [0xff, 0x00, 0x01]
+    );
+    assert!(matches!(
+        read_bounded_file(&path, &[directory.path()]),
+        Err(BoundaryError::InvalidEncoding)
     ));
 }
 

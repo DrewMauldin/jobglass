@@ -526,6 +526,25 @@ svg {
   display: flex;
   flex-direction: column;
 }
+.load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.8rem;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+.load-more span {
+  color: var(--muted);
+  font-size: 0.63rem;
+  font-weight: 500;
+}
 .job-row {
   display: grid;
   grid-template-columns: 2.25rem minmax(11rem, 1fr) minmax(6rem, 0.48fr) 5rem;

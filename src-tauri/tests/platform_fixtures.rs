@@ -37,6 +37,8 @@ fn launchd_fixture_normalises_and_runtime_evidence_enriches_it() {
 
     launchd::enrich_launchctl(&mut job, &fixture("macos/launchctl-backup.txt"));
     assert_eq!(value(&job.last_outcome).state, OutcomeState::Success);
+    launchd::enrich_launchctl_domain(&mut job, &fixture("macos/launchctl-domain.txt"));
+    assert_eq!(value(&job.last_outcome).state, OutcomeState::Success);
     assert!(
         launchd::parse_plist(
             fixture("macos/malformed.plist").as_bytes(),
@@ -45,6 +47,21 @@ fn launchd_fixture_normalises_and_runtime_evidence_enriches_it() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn launchd_binary_plist_is_bounded_and_supported() {
+    let xml = fixture("macos/launchd-backup.plist");
+    let plist_value = plist::Value::from_reader_xml(xml.as_bytes()).expect("XML fixture value");
+    let mut binary = Vec::new();
+    plist_value
+        .to_writer_binary(&mut binary)
+        .expect("binary fixture encoding");
+
+    let job = launchd::parse_plist(&binary, "binary fixture", JobScope::User)
+        .expect("valid binary launchd fixture");
+
+    assert_eq!(value(&job.native_identifier), "com.jobglass.fixture.backup");
 }
 
 #[test]
