@@ -214,12 +214,22 @@ jobs:
           syft-version: v1.51.1
           upload-artifact: false
           upload-release-assets: false
+      - name: Flatten release assets
+        shell: bash
+        run: |
+          while IFS= read -r -d '' asset; do
+            target="release-input/$(basename "$asset")"
+            test ! -e "$target"
+            mv "$asset" "$target"
+          done < <(find release-input -mindepth 2 -type f -print0)
+          find release-input -mindepth 1 -type d -empty -delete
+          test -z "$(find release-input -mindepth 1 -type d -print -quit)"
       - name: Generate checksums
         shell: bash
         run: |
           checksum_file=$(mktemp)
           cd release-input
-          find . -type f -printf '%P\0' | LC_ALL=C sort -z | xargs -0 --no-run-if-empty shasum -a 256 > "$checksum_file"
+          find . -maxdepth 1 -type f -printf '%f\0' | LC_ALL=C sort -z | xargs -0 --no-run-if-empty shasum -a 256 > "$checksum_file"
           mv "$checksum_file" SHA256SUMS
       - name: Generate GitHub build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
@@ -228,21 +238,29 @@ jobs:
       - name: Verify GitHub build provenance
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh attestation verify release-input/* --repo "$GITHUB_REPOSITORY"
+        shell: bash
+        run: |
+          for subject in release-input/*; do
+            test -f "$subject"
+            gh attestation verify "$subject" --repo "$GITHUB_REPOSITORY"
+          done
       - name: Create or replace only a draft release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          assets=(release-input/*)
+          test "${#assets[@]}" -gt 0
+          for asset in "${assets[@]}"; do test -f "$asset"; done
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             is_draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)
             test "$is_draft" = true || { echo "refusing to mutate published release $GITHUB_REF_NAME" >&2; exit 1; }
             while IFS= read -r asset; do
               test -z "$asset" || gh release delete-asset "$GITHUB_REF_NAME" "$asset" --yes
             done < <(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name')
-            gh release upload "$GITHUB_REF_NAME" release-input/*
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}"
           else
-            gh release create "$GITHUB_REF_NAME" release-input/* --draft --generate-notes --title "JobGlass $GITHUB_REF_NAME" --notes "Unsigned community packages. Verify SHA256SUMS and GitHub provenance before installation; platform code signing and notarisation are not claimed."
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" --draft --generate-notes --title "JobGlass $GITHUB_REF_NAME" --notes "Unsigned community packages. Verify SHA256SUMS and GitHub provenance before installation; platform code signing and notarisation are not claimed."
           fi
       - name: Re-download and verify published assets
         env:

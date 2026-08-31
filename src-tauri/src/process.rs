@@ -1,8 +1,9 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use wait_timeout::ChildExt;
 
@@ -54,6 +55,7 @@ fn run_program(
     timeout: Duration,
     environment: &[(&str, &str)],
 ) -> Result<NativeOutput, BoundaryError> {
+    let deadline = Instant::now() + timeout;
     let mut command = Command::new(program);
     command
         .args(arguments)
@@ -75,6 +77,10 @@ fn run_program(
     let mut child = command
         .spawn()
         .map_err(|error| BoundaryError::ProcessSpawn(error.to_string()))?;
+    let process_tree = ProcessTree::attach(&child).map_err(|error| {
+        let _ = child.kill();
+        BoundaryError::ProcessSpawn(error.to_string())
+    })?;
 
     let stdout = child
         .stdout
@@ -84,25 +90,22 @@ fn run_program(
         .stderr
         .take()
         .ok_or_else(|| BoundaryError::ProcessRead("stderr was unavailable".into()))?;
-    let stdout_reader = thread::spawn(move || read_capped(stdout));
-    let stderr_reader = thread::spawn(move || read_capped(stderr));
+    let (output_sender, output_receiver) = mpsc::channel();
+    spawn_reader(OutputKind::Stdout, stdout, output_sender.clone());
+    spawn_reader(OutputKind::Stderr, stderr, output_sender);
 
     let status = match child
-        .wait_timeout(timeout)
+        .wait_timeout(deadline.saturating_duration_since(Instant::now()))
         .map_err(|error| BoundaryError::ProcessRead(error.to_string()))?
     {
         Some(status) => status,
         None => {
-            terminate_child_tree(&mut child);
-            let _ = child.wait();
-            let _ = join_reader(stdout_reader);
-            let _ = join_reader(stderr_reader);
+            terminate_and_reap(&process_tree, &mut child);
             return Err(BoundaryError::ProcessTimeout);
         }
     };
 
-    let stdout = join_reader(stdout_reader)?;
-    let stderr = join_reader(stderr_reader)?;
+    let (stdout, stderr) = receive_outputs(&output_receiver, deadline, &process_tree, &mut child)?;
     if stdout.len().saturating_add(stderr.len()) > MAX_OUTPUT_BYTES {
         return Err(BoundaryError::OutputTooLarge {
             limit: MAX_OUTPUT_BYTES,
@@ -116,12 +119,68 @@ fn run_program(
     })
 }
 
-fn terminate_child_tree(child: &mut std::process::Child) {
-    #[cfg(unix)]
-    unsafe {
-        let _ = libc::kill(-(child.id() as i32), libc::SIGKILL);
+#[derive(Clone, Copy)]
+enum OutputKind {
+    Stdout,
+    Stderr,
+}
+
+fn spawn_reader(
+    kind: OutputKind,
+    stream: impl Read + Send + 'static,
+    sender: mpsc::Sender<(OutputKind, std::io::Result<Vec<u8>>)>,
+) {
+    thread::spawn(move || {
+        let _ = sender.send((kind, read_capped(stream)));
+    });
+}
+
+fn receive_outputs(
+    receiver: &mpsc::Receiver<(OutputKind, std::io::Result<Vec<u8>>)>,
+    deadline: Instant,
+    process_tree: &ProcessTree,
+    child: &mut std::process::Child,
+) -> Result<(Vec<u8>, Vec<u8>), BoundaryError> {
+    let mut stdout = None;
+    let mut stderr = None;
+    while stdout.is_none() || stderr.is_none() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            terminate_and_reap(process_tree, child);
+            return Err(BoundaryError::ProcessTimeout);
+        }
+        let (kind, result) = match receiver.recv_timeout(remaining) {
+            Ok(output) => output,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                terminate_and_reap(process_tree, child);
+                return Err(BoundaryError::ProcessTimeout);
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                terminate_and_reap(process_tree, child);
+                return Err(BoundaryError::ProcessRead(
+                    "output readers disconnected".into(),
+                ));
+            }
+        };
+        let bytes = match result {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                terminate_and_reap(process_tree, child);
+                return Err(BoundaryError::ProcessRead(error.to_string()));
+            }
+        };
+        match kind {
+            OutputKind::Stdout => stdout = Some(bytes),
+            OutputKind::Stderr => stderr = Some(bytes),
+        }
     }
+    Ok((stdout.unwrap_or_default(), stderr.unwrap_or_default()))
+}
+
+fn terminate_and_reap(process_tree: &ProcessTree, child: &mut std::process::Child) {
+    process_tree.terminate();
     let _ = child.kill();
+    let _ = child.wait_timeout(Duration::from_millis(100));
 }
 
 fn decode_native_output(bytes: Vec<u8>) -> Result<String, BoundaryError> {
@@ -186,13 +245,75 @@ fn read_capped(mut stream: impl Read) -> std::io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn join_reader(
-    reader: thread::JoinHandle<std::io::Result<Vec<u8>>>,
-) -> Result<Vec<u8>, BoundaryError> {
-    reader
-        .join()
-        .map_err(|_| BoundaryError::ProcessRead("output reader panicked".into()))?
-        .map_err(|error| BoundaryError::ProcessRead(error.to_string()))
+struct ProcessTree {
+    #[cfg(not(windows))]
+    process_id: u32,
+    #[cfg(windows)]
+    job: windows_sys::Win32::Foundation::HANDLE,
+}
+
+impl ProcessTree {
+    #[cfg(not(windows))]
+    fn attach(child: &std::process::Child) -> std::io::Result<Self> {
+        Ok(Self {
+            process_id: child.id(),
+        })
+    }
+
+    #[cfg(windows)]
+    fn attach(child: &std::process::Child) -> std::io::Result<Self> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
+
+        let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if job.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                std::ptr::from_ref(&limits).cast(),
+                std::mem::size_of_val(&limits) as u32,
+            )
+        };
+        let assigned =
+            configured != 0 && unsafe { AssignProcessToJobObject(job, child.as_raw_handle()) } != 0;
+        if !assigned {
+            let error = std::io::Error::last_os_error();
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(job);
+            }
+            return Err(error);
+        }
+        Ok(Self { job })
+    }
+
+    fn terminate(&self) {
+        #[cfg(unix)]
+        unsafe {
+            let _ = libc::kill(-(self.process_id as i32), libc::SIGKILL);
+        }
+        #[cfg(windows)]
+        unsafe {
+            let _ = windows_sys::Win32::System::JobObjects::TerminateJobObject(self.job, 1);
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ProcessTree {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.job);
+        }
+    }
 }
 
 #[cfg(all(test, unix))]

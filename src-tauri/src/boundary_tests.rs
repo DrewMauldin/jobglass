@@ -3,7 +3,8 @@ use crate::input::{
 };
 #[cfg(unix)]
 use crate::input::{
-    current_user_home, local_directory_exists, local_executable_exists, validate_directory_root,
+    current_user_home, current_user_name, local_directory_exists, local_executable_exists,
+    validate_directory_root,
 };
 #[cfg(unix)]
 use crate::process::{MAX_OUTPUT_BYTES, run_program_for_test};
@@ -11,7 +12,7 @@ use crate::process::{NativeTool, decode_native_output_for_test};
 use proptest::prelude::*;
 use std::path::Path;
 #[cfg(unix)]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[test]
 fn rejects_invalid_utf8_and_oversized_inputs() {
@@ -85,6 +86,25 @@ fn rejects_symlink_inputs() {
 
 #[cfg(unix)]
 #[test]
+fn rejects_fifo_inputs_without_blocking() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let directory = tempfile::tempdir().expect("temp directory");
+    let path = directory.path().join("blocking.plist");
+    let native_path = CString::new(path.as_os_str().as_bytes()).expect("FIFO path");
+    assert_eq!(unsafe { libc::mkfifo(native_path.as_ptr(), 0o600) }, 0);
+
+    let started = Instant::now();
+    assert!(matches!(
+        read_bounded_file_bytes(&path, &[directory.path()]),
+        Err(BoundaryError::NotARegularFile)
+    ));
+    assert!(started.elapsed() < Duration::from_millis(500));
+}
+
+#[cfg(unix)]
+#[test]
 fn rejects_a_symlink_in_any_parent_component() {
     use std::os::unix::fs::symlink;
 
@@ -106,6 +126,7 @@ fn rejects_a_symlink_in_any_parent_component() {
 fn current_home_is_derived_from_the_process_identity() {
     let home = current_user_home().expect("current user home directory");
     assert!(home.is_absolute());
+    assert!(!current_user_name().expect("current user name").is_empty());
 }
 
 #[cfg(unix)]
@@ -192,6 +213,12 @@ fn native_process_runner_caps_output_and_times_out() {
 
     let timed_out = run_program_for_test("/bin/sleep", &["2"], Duration::from_millis(20));
     assert!(matches!(timed_out, Err(BoundaryError::ProcessTimeout)));
+
+    let started = Instant::now();
+    let descendant =
+        run_program_for_test("/bin/sh", &["-c", "sleep 2 &"], Duration::from_millis(50));
+    assert!(matches!(descendant, Err(BoundaryError::ProcessTimeout)));
+    assert!(started.elapsed() < Duration::from_millis(500));
 }
 
 proptest! {

@@ -10,4 +10,4 @@ JobGlass v0.1.0 has no RustSec vulnerability findings and no npm vulnerabilities
 
 The `glib` advisory affects `VariantStrIter` iterator methods. JobGlass does not depend on `glib` directly or call those methods, but Tauri's Linux dependency tree includes the affected version. That transitive exposure cannot be claimed absent, so Linux packages carry this disclosed upstream risk.
 
-The project does not suppress or allowlist these notices. CI preserves the complete audit output, and releases remain blocked by known vulnerability findings. The notices will be re-evaluated on every dependency update; migrating with Tauri's supported Linux WebView stack is preferred over carrying a private GTK fork.
+The project does not suppress or allowlist these notices. CI preserves the complete audit output. Vulnerability findings that fail the configured audit command block releases; these separately classified inherited warnings do not by themselves block v0.1.0. The notices will be re-evaluated on every dependency update; migrating with Tauri's supported Linux WebView stack is preferred over carrying a private GTK fork.

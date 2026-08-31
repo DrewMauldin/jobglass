@@ -40,7 +40,7 @@ wait-timeout = "=0.2.1"
 libc = "=0.2.183"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "=0.61.2", features = ["Win32_System_SystemInformation"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [dev-dependencies]
 proptest = "=1.11.0"

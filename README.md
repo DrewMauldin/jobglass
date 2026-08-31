@@ -20,6 +20,49 @@ JobGlass is a free, local-first desktop inspector for native scheduled jobs. It 
 
 JobGlass is intentionally an inspector, not a scheduler. It cannot create, edit, delete, enable, disable, run, stop, or repair a job.
 
+## Why JobGlass exists
+
+Native schedulers are powerful, but each exposes a different vocabulary and a different set of blind spots. A launchd property list, a cron line, a systemd timer, and a Task Scheduler XML document do not answer the same questions in the same way. JobGlass gives them one interface without pretending their evidence is equivalent.
+
+It is useful when you need to answer questions such as:
+
+- What is expected to run next on this machine?
+- Which native definition produced this job?
+- Did the scheduler expose a last run or result, or is that information genuinely unavailable?
+- Are two definitions targeting the same command or schedule?
+- Is a path missing, a definition malformed, or visibility limited by the current user's permissions?
+- Can I share a report without automatically including command arguments or environment values?
+
+JobGlass does not monitor execution in the background and does not replace the operating system's scheduler tools. Every scan is an on-demand, read-only snapshot of evidence available to the current user.
+
+## How the evidence model works
+
+Every normalised field is either **available** with provenance or **unavailable** with a typed reason. Scope is not treated as proof of privilege, missing runtime history is not converted into success, and a permission error is not presented as an empty scheduler.
+
+The canonical model records:
+
+- scheduler, native identifier, display name, owner, scope, privilege evidence, and enabled state;
+- native schedule expression, plain-language explanation, timezone basis, next run, last run, and last outcome when observable;
+- executable, arguments, working directory, environment key names, triggers, dependencies, and activated service;
+- native source reference, field-level provenance, and parse warnings.
+
+Stable IDs are derived from scheduler type, native identifier, and scope. Display names and other mutable presentation fields do not change identity.
+
+## Deterministic findings
+
+Findings are rules over the collected model—not AI classifications, malware verdicts, or guarantees that a command is safe.
+
+| Finding family       | What JobGlass checks                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------ |
+| Identity and overlap | Duplicate native identifiers, duplicate commands, and matching native schedule expressions |
+| Definition health    | Malformed or ambiguous native definitions and invalid native state values                  |
+| Local paths          | Missing absolute executables and invalid working directories, using no-follow local probes |
+| Runtime evidence     | Disabled jobs, failed observable outcomes, and last runs older than 30 days                |
+| Environment          | Commands that depend on `PATH` and differences between privacy-safe environment key sets   |
+| Visibility           | Permission-limited or unavailable scheduler scopes                                         |
+
+The same input bundle produces the same findings and stable finding IDs.
+
 ## Install
 
 Download the package for your platform from the [latest GitHub release](https://github.com/DrewMauldin/jobglass/releases/latest), then verify it against `SHA256SUMS` before opening it.
@@ -47,6 +90,20 @@ See [development](docs/development.md) for the required Node, npm, Rust, and ope
 
 The full walkthrough is in [Quick start](docs/quick-start.md).
 
+## Platform behaviour
+
+### macOS
+
+JobGlass reads regular `.plist` definitions from the current user's LaunchAgents directory and the standard global launchd agent/daemon roots when accessible. It correlates bounded `launchctl print` output for the current GUI and system domains. A protected file, absent runtime record, or unsupported field stays explicit.
+
+### Linux
+
+JobGlass reads `/etc/crontab`, `/etc/cron.d`, executable periodic directories, and the current user's direct cron spool file in supported `/var/spool/cron*` layouts when readable. It never invokes the privilege-bearing `crontab` helper. User and system systemd managers are queried separately with fixed `systemctl` arguments; native calendar and monotonic expressions are preserved.
+
+### Windows
+
+JobGlass reads local Task Scheduler definitions and runtime information through fixed `schtasks` and ScheduledTasks PowerShell queries using the current token. It does not accept remote hosts, credentials, or arbitrary commands. Runtime records are bounded and joined to definitions by validated native identifier.
+
 ## Platform evidence
 
 | Platform      | Sources                                                  | v0.1.0 evidence                                          |
@@ -57,11 +114,71 @@ The full walkthrough is in [Quick start](docs/quick-start.md).
 
 A hosted build proves compilation and fixture behaviour, not native desktop appearance or local policy visibility. See the detailed [support matrix](SUPPORT_MATRIX.md).
 
+## Export formats
+
+All exports require the user to open a review dialog and acknowledge that paths and identifiers may identify a machine.
+
+- **JSON** preserves the versioned evidence contract and deterministic findings.
+- **CSV** provides a compact job table and neutralises spreadsheet-formula prefixes.
+- **HTML** produces a self-contained, escaped report with a restrictive Content Security Policy.
+
+Command arguments are replaced with `<redacted>` by default, including argument text repeated inside finding evidence. Including arguments is a separate explicit reviewed choice. Environment values never enter the model, so no export mode can reveal them.
+
 ## Privacy and security
 
 JobGlass has no network feature, account, analytics, telemetry, AI, updater, or remote-management path. The WebView receives only a bounded, serialisable evidence model through two custom read-only commands. Native inputs, outputs, time, paths, and job counts are capped.
 
+Native scheduler files are opened beneath allowlisted roots with component-relative no-follow semantics. Special files are opened nonblocking and rejected by type. Native command output, runtime-record counts, and total command duration are bounded; timed-out process trees are terminated. JobGlass never executes a command discovered in a scheduler definition.
+
 Exports can still reveal usernames, paths, commands, owners, schedules, and source references. Read [Privacy](docs/privacy.md), [Permissions](docs/permissions.md), and the [security policy and threat model](SECURITY.md) before sharing a report. Report vulnerabilities through GitHub private vulnerability reporting, not a public issue.
+
+## Architecture
+
+```text
+allowlisted files + fixed native queries
+                  │
+                  ▼
+        bounded Rust adapters
+                  │
+                  ▼
+   versioned evidence model + findings
+                  │
+          ┌───────┴────────┐
+          ▼                ▼
+  read-only Tauri IPC   reviewed exports
+          │          JSON · CSV · HTML
+          ▼
+   React evidence interface
+```
+
+The Rust core owns native access, parsing, normalisation, diagnostics, and export generation. Tauri exposes only scan and export commands. React renders the serialised model and cannot browse the filesystem or start processes. See [Architecture](docs/architecture.md) and the decision records under [docs/decisions](docs/decisions/).
+
+## Build and verify from source
+
+Prerequisites and platform packages are documented in [Development](docs/development.md). The short path is:
+
+```bash
+git clone https://github.com/DrewMauldin/jobglass.git
+cd jobglass
+npm ci
+npm run quality -- full
+npm run tauri:build
+```
+
+The full quality path checks TypeScript, ESLint, formatting, documentation links, source-floor rules, unit tests, changed-line and overall coverage, production bundle size, Playwright/axe flows at four window sizes, Rust formatting, Clippy with warnings denied, all Rust tests, coverage, the 5,000-job diagnostic benchmark, dependency audits, workflow syntax, and committed-history secret scanning.
+
+Platform packages are built natively on macOS, Ubuntu, and Windows. Release automation binds an annotated version tag to the exact `main` commit, rebuilds the packages, generates checksums and a CycloneDX SBOM, records GitHub provenance, re-downloads the draft assets, verifies them, and only then publishes the release.
+
+## Release trust
+
+v0.1.0 is a deliberately **unsigned community release**:
+
+- macOS has no Developer ID signature or notarisation;
+- Windows has no Authenticode publisher signature;
+- Linux packages are unsigned;
+- release checksums, SBOM, and GitHub build provenance verify build identity and bytes, not a paid platform publisher identity.
+
+If unsigned packages do not meet your trust requirements, build the tagged source yourself. The [verification record](docs/verification/v0.1.0.md) keeps reviewed source, local tests, real macOS runtime, hosted compilation, package validation, signing state, release publication, and live documentation as separate evidence gates.
 
 ## Documentation
 

@@ -147,8 +147,8 @@ fn exports_require_review_redact_arguments_and_escape_html() {
 #[test]
 fn default_export_redacts_arguments_repeated_in_finding_evidence() {
     let result = cron::parse_crontab(
-        "0 1 * * * /usr/bin/backup --token fixture-secret\n0 2 * * * /usr/bin/backup --token fixture-secret\n",
-        "sensitive fixture",
+        "0 1 * * * /usr/bin/backup --token 'private-marker\"secret\\path'\n0 2 * * * /usr/bin/backup --token 'private-marker\"secret\\path'\n",
+        "argument redaction source",
         JobScope::User,
         Some("fixture-user"),
         false,
@@ -173,8 +173,8 @@ fn default_export_redacts_arguments_repeated_in_finding_evidence() {
     )
     .expect("reviewed argument export");
 
-    assert!(!redacted.contains("fixture-secret"));
-    assert!(included.contains("fixture-secret"));
+    assert!(!redacted.contains("private-marker"));
+    assert!(included.contains("private-marker"));
 }
 
 #[test]

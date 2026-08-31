@@ -144,6 +144,7 @@ fn prepared_findings(
         })
         .flatten()
         .filter(|argument| !argument.is_empty())
+        .flat_map(|argument| [format!("{argument:?}"), argument.clone()])
         .collect::<Vec<_>>();
     arguments.sort_by_key(|argument| std::cmp::Reverse(argument.len()));
     findings
@@ -152,7 +153,7 @@ fn prepared_findings(
         .map(|mut finding| {
             for item in &mut finding.evidence {
                 for argument in &arguments {
-                    *item = item.replace(argument.as_str(), "<redacted>");
+                    *item = item.replace(argument, "<redacted>");
                 }
             }
             finding

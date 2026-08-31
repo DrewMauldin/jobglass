@@ -366,7 +366,7 @@ mod linux {
     use crate::adapters::{AdapterResult, cron, systemd, warning};
     use crate::app::{ScanBundle, bundle};
     use crate::diagnostics::{Visibility, VisibilityStatus};
-    use crate::input::{MAX_JOBS, read_bounded_file, validate_directory_root};
+    use crate::input::{MAX_JOBS, current_user_name, read_bounded_file, validate_directory_root};
     use crate::model::{JobScope, ParseWarning, ScheduledJob, SchedulerKind};
     use crate::process::{NativeTool, run_native_tool};
 
@@ -374,11 +374,22 @@ mod linux {
         let mut jobs = Vec::new();
         let mut warnings = Vec::new();
         let mut visibility = Vec::new();
-        visibility.push(unavailable(
-            SchedulerKind::Cron,
-            JobScope::User,
-            "User crontabs are not read through the privilege-bearing crontab helper.",
-        ));
+        visibility.push(match current_user_name() {
+            Some(username) => scan_user_cron_roots(
+                &[
+                    Path::new("/var/spool/cron/crontabs"),
+                    Path::new("/var/spool/cron"),
+                ],
+                &username,
+                &mut jobs,
+                &mut warnings,
+            ),
+            None => unavailable(
+                SchedulerKind::Cron,
+                JobScope::User,
+                "The current user identity was unavailable; the crontab helper was not invoked.",
+            ),
+        });
         let (system_cron_seen, system_cron_limited) =
             scan_system_cron(Path::new("/etc"), &mut jobs, &mut warnings);
         if system_cron_seen && !system_cron_limited {
@@ -401,6 +412,76 @@ mod linux {
         }
         jobs.sort_by(|left, right| left.id.cmp(&right.id));
         bundle("Linux cron and systemd", jobs, warnings, visibility)
+    }
+
+    fn scan_user_cron_roots(
+        roots: &[&Path],
+        username: &str,
+        jobs: &mut Vec<ScheduledJob>,
+        warnings: &mut Vec<ParseWarning>,
+    ) -> Visibility {
+        let mut read_any = false;
+        let mut limited_any = false;
+        for root in roots {
+            match std::fs::symlink_metadata(root) {
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::NotFound => continue,
+                Err(error) => {
+                    warnings.push(warning(
+                        "cron.userDirectory",
+                        error.to_string(),
+                        &root.display().to_string(),
+                    ));
+                    limited_any = true;
+                    continue;
+                }
+            }
+            let path = root.join(username);
+            match read_bounded_file(&path, &[*root]) {
+                Ok(contents) => {
+                    let source = path.display().to_string();
+                    append_result(
+                        jobs,
+                        warnings,
+                        cron::parse_crontab(
+                            &contents,
+                            &source,
+                            JobScope::User,
+                            Some(username),
+                            false,
+                        ),
+                        &source,
+                    );
+                    read_any = true;
+                }
+                Err(_)
+                    if std::fs::symlink_metadata(&path)
+                        .is_err_and(|error| error.kind() == ErrorKind::NotFound) => {}
+                Err(error) => {
+                    warnings.push(warning(
+                        "cron.userRead",
+                        error.to_string(),
+                        &path.display().to_string(),
+                    ));
+                    limited_any = true;
+                }
+            }
+        }
+        if limited_any {
+            limited(
+                SchedulerKind::Cron,
+                JobScope::User,
+                "The current user's direct cron spool file was permission-limited.",
+            )
+        } else if read_any {
+            visible(SchedulerKind::Cron, JobScope::User)
+        } else {
+            unavailable(
+                SchedulerKind::Cron,
+                JobScope::User,
+                "No readable current-user cron spool file was present; the crontab helper was not invoked.",
+            )
+        }
     }
 
     fn scan_system_cron(
@@ -880,6 +961,32 @@ mod linux {
                     }
                 )
             }));
+        }
+
+        #[test]
+        fn user_cron_collector_reads_a_direct_accessible_spool_file() {
+            let root = tempfile::tempdir().expect("user cron root");
+            std::fs::write(
+                root.path().join("fixture-user"),
+                "0 4 * * * /usr/bin/refresh --quiet\n",
+            )
+            .expect("user crontab");
+            let mut jobs = Vec::new();
+            let mut warnings = Vec::new();
+
+            let visibility =
+                scan_user_cron_roots(&[root.path()], "fixture-user", &mut jobs, &mut warnings);
+
+            assert_eq!(visibility.status, VisibilityStatus::Complete);
+            assert!(warnings.is_empty(), "{warnings:?}");
+            assert_eq!(jobs.len(), 1);
+            assert!(matches!(
+                jobs[0].scope,
+                Evidence::Available {
+                    value: JobScope::User,
+                    ..
+                }
+            ));
         }
 
         #[test]

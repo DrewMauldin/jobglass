@@ -90,6 +90,16 @@ pub fn valid_environment_key(value: &str) -> bool {
 
 #[cfg(unix)]
 pub fn current_user_home() -> Option<PathBuf> {
+    current_user_identity().map(|(home, _)| home)
+}
+
+#[cfg(unix)]
+pub fn current_user_name() -> Option<String> {
+    current_user_identity().map(|(_, name)| name)
+}
+
+#[cfg(unix)]
+fn current_user_identity() -> Option<(PathBuf, String)> {
     use std::ffi::CStr;
     use std::ffi::OsString;
     use std::mem::MaybeUninit;
@@ -117,11 +127,25 @@ pub fn current_user_home() -> Option<PathBuf> {
         return None;
     }
     let password_record = unsafe { password_record.assume_init() };
-    if password_record.pw_dir.is_null() {
+    if password_record.pw_dir.is_null() || password_record.pw_name.is_null() {
         return None;
     }
-    let bytes = unsafe { CStr::from_ptr(password_record.pw_dir) }.to_bytes();
-    Some(PathBuf::from(OsString::from_vec(bytes.to_vec())))
+    let home = unsafe { CStr::from_ptr(password_record.pw_dir) }.to_bytes();
+    let name = unsafe { CStr::from_ptr(password_record.pw_name) }
+        .to_str()
+        .ok()?;
+    if name.is_empty()
+        || name.len() > 256
+        || !name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+    {
+        return None;
+    }
+    Some((
+        PathBuf::from(OsString::from_vec(home.to_vec())),
+        name.to_owned(),
+    ))
 }
 
 pub fn validate_directory_root(root: &Path) -> Result<(), BoundaryError> {
@@ -250,7 +274,11 @@ fn open_beneath_root(root: &Path, relative: &Path) -> Result<File, BoundaryError
         let flags = libc::O_RDONLY
             | libc::O_NOFOLLOW
             | libc::O_CLOEXEC
-            | if is_final { 0 } else { libc::O_DIRECTORY };
+            | if is_final {
+                libc::O_NONBLOCK
+            } else {
+                libc::O_DIRECTORY
+            };
         let file_descriptor = unsafe { libc::openat(parent_fd, name.as_ptr(), flags) };
         if file_descriptor < 0 {
             return Err(map_no_follow_error(std::io::Error::last_os_error()));

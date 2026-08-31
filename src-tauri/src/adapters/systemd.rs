@@ -36,7 +36,7 @@ pub fn parse_timer_show(input: &str, scope: JobScope) -> Result<ScheduledJob, Pa
     let unit_file_state = properties.get("UnitFileState").copied().unwrap_or("");
     job.enabled = Evidence::available(
         match unit_file_state {
-            "enabled" | "enabled-runtime" | "static" => EnabledState::Enabled,
+            "enabled" | "enabled-runtime" => EnabledState::Enabled,
             "disabled" | "masked" => EnabledState::Disabled,
             _ => EnabledState::Unknown,
         },

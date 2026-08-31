@@ -1,8 +1,8 @@
 use crate::adapters::{AdapterResult, warning};
 use crate::input::{MAX_JOBS, valid_environment_key};
 use crate::model::{
-    EnabledState, Evidence, JobScope, Provenance, ScheduleKind, ScheduleSpec, ScheduledJob,
-    SchedulerKind, TimezoneBasis, Trigger,
+    EnabledState, Evidence, JobScope, PrivilegeLevel, Provenance, ScheduleKind, ScheduleSpec,
+    ScheduledJob, SchedulerKind, TimezoneBasis, Trigger,
 };
 
 pub fn parse_crontab(
@@ -72,6 +72,14 @@ pub fn parse_crontab(
                 );
                 job.enabled = Evidence::available(EnabledState::Enabled, provenance.clone());
                 if let Some(owner) = owner.or_else(|| default_owner.map(str::to_owned)) {
+                    job.privilege_level = Evidence::available(
+                        if owner == "root" {
+                            PrivilegeLevel::System
+                        } else {
+                            PrivilegeLevel::StandardUser
+                        },
+                        provenance.clone(),
+                    );
                     job.owner = Evidence::available(owner, provenance.clone());
                 }
                 job.schedule = Evidence::available(

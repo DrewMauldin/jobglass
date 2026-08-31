@@ -16,7 +16,7 @@ It runs fixed, bounded `launchctl print` queries for the current GUI and system 
 
 ## Linux
 
-JobGlass reads allowlisted system cron definitions and makes fixed read-only `systemctl` queries. It deliberately does not invoke the privilege-bearing `crontab` helper, so user-crontab visibility is reported as unavailable. User and system systemd managers are queried separately. It does not inspect unrelated logs to invent cron success history.
+JobGlass reads allowlisted system cron definitions and the current user's direct cron spool file in supported `/var/spool/cron*` layouts when that file is readable. It deliberately does not invoke the privilege-bearing `crontab` helper, so absent or unreadable user-crontab evidence is explicit. User and system systemd managers are queried separately. It does not inspect unrelated logs to invent cron success history.
 
 ## Windows
 
@@ -24,6 +24,6 @@ JobGlass invokes local, fixed Task Scheduler query commands with the current tok
 
 ## File boundary
 
-Native inputs must be regular files under an expected scheduler root. Symlinks are rejected rather than followed. Each file, native command output, overall job count, and command duration is capped. These controls protect the parser and do not expand the operating system access granted to JobGlass.
+Native inputs must be regular files under an expected scheduler root. Symlinks and special files are rejected without blocking rather than followed or read. Each file, native command output, overall job count, runtime-record count, and end-to-end command duration is capped. Timed-out command process trees are terminated. These controls protect the parser and do not expand the operating system access granted to JobGlass.
 
 See [Security](../SECURITY.md) for the threat model and [Support matrix](../SUPPORT_MATRIX.md) for source-by-source limitations.

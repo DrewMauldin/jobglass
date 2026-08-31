@@ -229,13 +229,7 @@ impl ScheduledJob {
             display_name: Evidence::available(display_name.into(), provenance.clone()),
             owner: unavailable!(UnavailableReason::NotReported),
             scope: Evidence::available(scope, provenance.clone()),
-            privilege_level: Evidence::available(
-                match scope {
-                    JobScope::User => PrivilegeLevel::StandardUser,
-                    JobScope::System => PrivilegeLevel::System,
-                },
-                provenance.clone(),
-            ),
+            privilege_level: unavailable!(UnavailableReason::NotReported),
             enabled: Evidence::available(EnabledState::Unknown, provenance.clone()),
             schedule: unavailable!(UnavailableReason::NotReported),
             schedule_explanation: unavailable!(UnavailableReason::NotReported),

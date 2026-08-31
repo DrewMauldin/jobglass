@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::DateTime;
 use roxmltree::{Document, Node};
 use serde::Deserialize;
@@ -90,6 +92,9 @@ fn parse_task_node(task: Node<'_, '_>, source: &str) -> Result<ScheduledJob, Par
 
     if let Some(owner) = owner {
         job.owner = Evidence::available(owner, provenance.clone());
+    }
+    if scope == JobScope::System {
+        job.privilege_level = Evidence::available(PrivilegeLevel::System, provenance.clone());
     }
     if scope == JobScope::User
         && let Some(run_level) = principal_text(task, "RunLevel")
@@ -224,15 +229,24 @@ pub fn enrich_runtime_json(
 ) -> Result<(), ParseWarning> {
     let records = serde_json::from_str::<Vec<RuntimeEvidence>>(input)
         .map_err(|error| warning("windows.runtimeJson", error.to_string(), source))?;
+    if records.len() > MAX_JOBS {
+        return Err(warning(
+            "windows.runtimeLimit",
+            format!("runtime record limit of {MAX_JOBS} exceeded"),
+            source,
+        ));
+    }
+    let mut job_indexes = HashMap::new();
+    for (index, job) in jobs.iter().enumerate() {
+        if let Evidence::Available { value, .. } = &job.native_identifier {
+            job_indexes.entry(value.clone()).or_insert(index);
+        }
+    }
     for record in records {
-        let Some(job) = jobs.iter_mut().find(|job| {
-            matches!(
-                &job.native_identifier,
-                Evidence::Available { value, .. } if value == &record.identifier
-            )
-        }) else {
+        let Some(index) = job_indexes.get(&record.identifier).copied() else {
             continue;
         };
+        let job = &mut jobs[index];
         let provenance = provenance(source);
         if let Some(next_run_time) = record.next_run_time.as_deref() {
             if let Some(next_run) = normalise_runtime(next_run_time) {

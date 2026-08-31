@@ -1,8 +1,10 @@
 use chrono::{DateTime, Utc};
 use jobglass_lib::adapters::{cron, launchd, systemd, windows};
 use jobglass_lib::diagnostics::{Visibility, VisibilityStatus, diagnose};
+use jobglass_lib::input::MAX_JOBS;
 use jobglass_lib::model::{
     EnabledState, Evidence, JobScope, OutcomeState, ParseWarning, PrivilegeLevel, ScheduleKind,
+    UnavailableReason,
 };
 use std::path::PathBuf;
 
@@ -247,6 +249,52 @@ fn systemd_timer_preserves_calendar_and_monotonic_evidence() {
 }
 
 #[test]
+fn scope_alone_never_invents_privilege_evidence() {
+    let system_cron = cron::parse_crontab(
+        &fixture("linux/cron/system.crontab"),
+        "/etc/crontab",
+        JobScope::System,
+        None,
+        true,
+    );
+    assert_eq!(
+        value(&system_cron.jobs[0].privilege_level),
+        &PrivilegeLevel::StandardUser
+    );
+
+    let systemd_job = systemd::parse_timer_show(
+        &fixture("linux/systemd/backup.timer.show"),
+        JobScope::System,
+    )
+    .expect("systemd fixture");
+    assert!(matches!(
+        systemd_job.privilege_level,
+        Evidence::Unavailable {
+            reason: UnavailableReason::NotReported,
+            ..
+        }
+    ));
+
+    let windows = windows::parse_task_xml_collection(
+        &fixture_bytes("windows/multiple-tasks.xml"),
+        "Windows collection",
+    );
+    assert_eq!(
+        value(&windows.jobs[1].privilege_level),
+        &PrivilegeLevel::System
+    );
+}
+
+#[test]
+fn static_systemd_units_are_not_reported_as_enabled() {
+    let input = fixture("linux/systemd/backup.timer.show")
+        .replace("UnitFileState=enabled", "UnitFileState=static");
+    let job = systemd::parse_timer_show(&input, JobScope::System).expect("static timer fixture");
+
+    assert_eq!(value(&job.enabled), &EnabledState::Unknown);
+}
+
+#[test]
 fn invalid_runtime_timestamps_are_explicit_parse_warnings() {
     let systemd_input = fixture("linux/systemd/backup.timer.show")
         .replace("Mon 2026-08-31 03:30:00 UTC", "invalid-next")
@@ -319,6 +367,18 @@ fn windows_collection_preserves_each_task_scope_and_runtime() {
         OutcomeState::Failed
     );
     assert!(DateTime::parse_from_rfc3339(&value(&result.jobs[0].next_run).iso8601).is_ok());
+}
+
+#[test]
+fn windows_runtime_enrichment_rejects_excess_records() {
+    let record = r#"{"identifier":"missing","state":"Ready"}"#;
+    let input = format!("[{}]", vec![record; MAX_JOBS + 1].join(","));
+    let mut jobs = Vec::new();
+
+    let warning = windows::enrich_runtime_json(&mut jobs, &input, "runtime limit fixture")
+        .expect_err("excess runtime records must fail closed");
+
+    assert_eq!(warning.code, "windows.runtimeLimit");
 }
 
 #[test]
