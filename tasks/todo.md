@@ -4,8 +4,8 @@
 
 **Acceptance criteria:**
 
-- [ ] Rust, npm and Tauri versions are pinned with one lockfile per ecosystem.
-- [ ] Dependency lifecycle scripts default-deny and required exceptions are version-pinned.
+- [x] Rust, npm and Tauri versions are pinned with one lockfile per ecosystem.
+- [x] Dependency lifecycle scripts default-deny and required exceptions are version-pinned.
 - [ ] Fast, task and full quality commands are reproducible.
 
 **Verification:** `npm ci`, `npm run check:fast`, `cargo metadata --locked --manifest-path src-tauri/Cargo.toml`
@@ -17,8 +17,8 @@
 
 **Acceptance criteria:**
 
-- [ ] Contract represents all required fields, unavailable reasons, provenance and warnings.
-- [ ] Environment values cannot be represented.
+- [x] Contract represents all required fields, unavailable reasons, provenance and warnings.
+- [x] Environment values cannot be represented.
 
 **Verification:** focused Rust model tests and TypeScript contract typecheck
 **Dependencies:** Task 1
