@@ -1,0 +1,26 @@
+# Node
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+
+# Rust and Tauri
+target/
+src-tauri/target/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+
+# Generated release evidence
+artifacts/
+*.log
