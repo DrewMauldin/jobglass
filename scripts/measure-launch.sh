@@ -43,6 +43,7 @@ measure_launch() {
 
   finished=$(perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e 'printf "%.9f", clock_gettime(CLOCK_MONOTONIC)')
   elapsed_ms=$(perl -e 'printf "%.1f", ($ARGV[1] - $ARGV[0]) * 1000' "$started" "$finished")
+  collect_receipt=$(grep -oE '\{"event":"scan\.collect"[^}]+\}' "$receipt_log" | head -n 1)
   scan_receipt=$(grep -oE '\{"event":"scan\.complete"[^}]+\}' "$receipt_log" | head -n 1)
 }
 
@@ -53,5 +54,5 @@ wait "$app_pid" 2>/dev/null || true
 app_pid=
 
 measure_launch
-printf 'warm-launch-ms=%s prime-launch-ms=%s %s\n' "$elapsed_ms" "$prime_ms" "$scan_receipt"
+printf 'warm-launch-ms=%s prime-launch-ms=%s %s %s\n' "$elapsed_ms" "$prime_ms" "$collect_receipt" "$scan_receipt"
 awk -v elapsed="$elapsed_ms" 'BEGIN { exit !(elapsed < 1500) }'

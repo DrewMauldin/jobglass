@@ -135,8 +135,14 @@ mod macos {
         let uid = unsafe { libc::getuid() };
         let gui_target = format!("gui/{uid}");
         let domains_started = std::time::Instant::now();
-        let gui_output = domain_output(&gui_target);
-        let system_output = domain_output("system");
+        let (gui_output, system_output) = std::thread::scope(|scope| {
+            let gui = scope.spawn(|| domain_output(&gui_target));
+            let system = scope.spawn(|| domain_output("system"));
+            (
+                gui.join().unwrap_or_default(),
+                system.join().unwrap_or_default(),
+            )
+        });
         let domains_ms = domains_started.elapsed().as_secs_f64() * 1_000.0;
 
         match current_user_home() {
