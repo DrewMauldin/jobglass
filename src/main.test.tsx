@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { demoBundle, largeDemoBundle } from "./data/demo";
+import { renderBrowserExport } from "./export";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
@@ -49,10 +50,16 @@ describe("JobGlass desktop experience", () => {
     ).toBeNull();
 
     await user.clear(screen.getByRole("searchbox", { name: "Search jobs" }));
-    await user.click(screen.getByRole("tab", { name: "Timeline" }));
+    const viewControl = screen.getByRole("group", { name: "Job view" });
+    const timelineButton = within(viewControl).getByRole("button", {
+      name: "Timeline",
+    });
+    expect(timelineButton).toHaveAttribute("aria-pressed", "false");
+    await user.click(timelineButton);
+    expect(timelineButton).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Next run unknown")).toBeVisible();
 
-    await user.click(screen.getByRole("tab", { name: "List" }));
+    await user.click(within(viewControl).getByRole("button", { name: "List" }));
     await user.click(screen.getByRole("button", { name: /nightly backup/i }));
     expect(
       screen.getByRole("heading", { name: "Evidence inspector" }),
@@ -61,6 +68,61 @@ describe("JobGlass desktop experience", () => {
     expect(
       screen.getByText("backup.timer", { selector: ".native-id" }),
     ).toBeVisible();
+    expect(screen.getByText("Owner")).toBeVisible();
+    expect(screen.getByText("Privilege")).toBeVisible();
+    expect(screen.getByText("Schedule expression")).toBeVisible();
+    expect(screen.getByText("Scheduler timezone")).toBeVisible();
+    expect(screen.getByText("Last outcome")).toBeVisible();
+    expect(screen.getByText("Target service")).toBeVisible();
+    expect(screen.getByText("Triggers")).toBeVisible();
+    expect(screen.getByText("Dependencies")).toBeVisible();
+    expect(screen.getByText("Parse warnings")).toBeVisible();
+  });
+
+  it("sorts jobs by the next observable run and exposes selection semantics", async () => {
+    const user = userEvent.setup();
+    render(<App loader={loadDemo} />);
+    await screen.findByRole("heading", { name: "Scheduled jobs" });
+
+    const jobList = document.querySelector(".job-list");
+    expect(jobList).not.toBeNull();
+    const rows = within(jobList as HTMLElement).getAllByRole("button");
+    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Refresh cache, cron",
+      "Nightly backup, systemd",
+      "Documents sync, launchd",
+      "Fixture cleanup, Task Scheduler",
+    ]);
+
+    const backup = screen.getByRole("button", { name: /nightly backup/i });
+    expect(backup).toHaveAttribute("aria-current", "true");
+    const sync = screen.getByRole("button", { name: /documents sync/i });
+    await user.click(sync);
+    expect(sync).toHaveAttribute("aria-current", "true");
+    expect(backup).not.toHaveAttribute("aria-current");
+    expect(screen.getByText("exit code 1")).toBeVisible();
+    expect(screen.getAllByText(/Unavailable: not reported/i)[0]).toBeVisible();
+  });
+
+  it("renders each browser export in the requested format", () => {
+    const policy = { reviewed: true, includeArguments: false } as const;
+    const json = renderBrowserExport(demoBundle, "json", policy);
+    const csv = renderBrowserExport(demoBundle, "csv", policy);
+    const html = renderBrowserExport(demoBundle, "html", policy);
+
+    const parsed = JSON.parse(json) as {
+      jobs: { arguments: { value: string[] } }[];
+    };
+    expect(parsed.jobs[0]?.arguments.value).toEqual(["<redacted>"]);
+    expect(csv).toMatch(/^id,scheduler,name,/);
+    expect(csv).toContain("Nightly backup");
+    expect(csv).toContain("<redacted>");
+    expect(csv).not.toContain("--incremental");
+    expect(html).toMatch(/^<!doctype html>/i);
+    expect(html).toContain("<table>");
+    expect(html).toContain("Nightly backup");
+    expect(html).toContain("&lt;redacted&gt;");
+    expect(html).not.toContain("--incremental");
   });
 
   it("blocks export until privacy review is acknowledged", async () => {
@@ -151,6 +213,7 @@ describe("JobGlass desktop experience", () => {
       screen.getByRole("heading", { name: "Last run failed" }),
     ).toBeVisible();
     expect(screen.getByText("Visibility finding")).toBeVisible();
+    expect(screen.getByText("/etc/cron.d/private")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Overview" }));
     await user.selectOptions(

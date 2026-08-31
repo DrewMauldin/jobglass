@@ -269,7 +269,7 @@ svg {
 }
 .nav-label {
   margin: 0 0.5rem 0.55rem;
-  color: var(--faint);
+  color: var(--text);
   font-size: 0.66rem;
   font-weight: 800;
   letter-spacing: 0.11em;
@@ -569,6 +569,12 @@ svg {
   background: var(--accent-soft);
   box-shadow: inset 3px 0 var(--accent);
 }
+.job-row.selected .job-primary small,
+.job-row.selected .job-primary code,
+.job-row.selected .job-timing small,
+.job-row.selected .job-status small {
+  color: var(--text);
+}
 .scheduler-mark {
   display: inline-flex;
   align-items: center;
@@ -725,8 +731,26 @@ svg {
   overflow-wrap: anywhere;
 }
 .evidence-list dd.unavailable {
-  color: var(--faint);
+  color: var(--text);
   font-style: italic;
+}
+.evidence-provenance,
+.parse-warnings small {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.59rem;
+  font-style: normal;
+}
+.parse-warnings,
+.finding-evidence {
+  margin: 0.35rem 0 0;
+  padding-left: 1rem;
+}
+.parse-warnings li,
+.finding-evidence li {
+  margin-top: 0.2rem;
+  line-height: 1.4;
 }
 .inspector-findings {
   margin-top: 1rem;
@@ -759,6 +783,11 @@ svg {
   color: var(--muted);
   font-size: 0.65rem;
   line-height: 1.45;
+}
+.inspector-findings .finding-evidence {
+  grid-column: 1 / -1;
+  color: var(--text);
+  font-size: 0.64rem;
 }
 
 .timeline {
@@ -880,6 +909,10 @@ svg {
 .findings-view small {
   color: var(--faint);
   font-size: 0.65rem;
+}
+.findings-view .finding-evidence {
+  color: var(--text);
+  font-size: 0.68rem;
 }
 .findings-view > article > code {
   color: var(--faint);
@@ -1091,7 +1124,7 @@ svg {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 800px) {
   .topbar {
     flex-wrap: wrap;
     gap: 0.5rem;

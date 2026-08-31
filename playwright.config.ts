@@ -25,6 +25,13 @@ export default defineConfig({
         viewport: { width: 720, height: 520 },
       },
     },
+    {
+      name: "intermediate-window",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 770, height: 700 },
+      },
+    },
   ],
   webServer: {
     command: "npm run preview -- --host 127.0.0.1 --port 43177 --strictPort",

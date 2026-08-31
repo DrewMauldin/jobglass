@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { demoBundle, largeDemoBundle } from "./data/demo";
+import { renderBrowserExport } from "./export";
 import type {
   Evidence,
   ExportFormat,
   ExportPolicy,
   Finding,
+  RunTime,
   ScanBundle,
   ScheduledJob,
   SchedulerKind,
@@ -83,23 +85,25 @@ export function App({
   const filteredJobs = useMemo(() => {
     if (!bundle) return [];
     const normalisedQuery = query.trim().toLocaleLowerCase();
-    return bundle.jobs.filter((job) => {
-      if (scheduler !== "all" && evidence(job.scheduler) !== scheduler)
-        return false;
-      if (!normalisedQuery) return true;
-      return [
-        evidence(job.displayName),
-        evidence(job.nativeIdentifier),
-        evidence(job.executable),
-        evidence(job.scheduleExplanation),
-      ].some((value) =>
-        (value ?? "").toLocaleLowerCase().includes(normalisedQuery),
-      );
-    });
+    return bundle.jobs
+      .filter((job) => {
+        if (scheduler !== "all" && evidence(job.scheduler) !== scheduler)
+          return false;
+        if (!normalisedQuery) return true;
+        return [
+          evidence(job.displayName),
+          evidence(job.nativeIdentifier),
+          evidence(job.executable),
+          evidence(job.scheduleExplanation),
+        ].some((value) =>
+          (value ?? "").toLocaleLowerCase().includes(normalisedQuery),
+        );
+      })
+      .sort(compareJobsByNextRun);
   }, [bundle, query, scheduler]);
 
   const selectedJob =
-    bundle?.jobs.find((job) => jobUiKey(job) === selectedKey) ??
+    filteredJobs.find((job) => jobUiKey(job) === selectedKey) ??
     filteredJobs[0] ??
     null;
   const selectedFindings = bundle
@@ -128,7 +132,15 @@ export function App({
 
   return (
     <div className="app-frame">
-      <a className="skip-link" href="#main-content">
+      <a
+        className="skip-link"
+        href="#main-content"
+        onClick={() => {
+          setTimeout(() => {
+            document.getElementById("main-content")?.focus();
+          }, 0);
+        }}
+      >
         Skip to scheduled jobs
       </a>
       <header className="topbar">
@@ -161,6 +173,9 @@ export function App({
             className="button button-primary"
             type="button"
             onClick={() => {
+              setReviewed(false);
+              setIncludeArguments(false);
+              setExportStatus(null);
               setExportOpen(true);
             }}
             disabled={!bundle || bundle.jobs.length === 0}
@@ -205,7 +220,7 @@ export function App({
           </div>
         </aside>
 
-        <main id="main-content" className="main-panel">
+        <main id="main-content" className="main-panel" tabIndex={-1}>
           {loading && <LoadingState />}
           {!loading && error && (
             <ErrorState
@@ -287,13 +302,12 @@ export function App({
                       </label>
                       <div
                         className="view-tabs"
-                        role="tablist"
+                        role="group"
                         aria-label="Job view"
                       >
                         <button
                           type="button"
-                          role="tab"
-                          aria-selected={view === "list"}
+                          aria-pressed={view === "list"}
                           className={view === "list" ? "selected" : ""}
                           onClick={() => {
                             setView("list");
@@ -303,8 +317,7 @@ export function App({
                         </button>
                         <button
                           type="button"
-                          role="tab"
-                          aria-selected={view === "timeline"}
+                          aria-pressed={view === "timeline"}
                           className={view === "timeline" ? "selected" : ""}
                           onClick={() => {
                             setView("timeline");
@@ -315,7 +328,10 @@ export function App({
                       </div>
                     </div>
                     <div className="result-meta" aria-live="polite">
-                      <strong>{filteredJobs.length} jobs</strong>
+                      <strong>
+                        {filteredJobs.length}{" "}
+                        {plural(filteredJobs.length, "job")}
+                      </strong>
                       <span>Sorted by next observable run</span>
                     </div>
                     {filteredJobs.length === 0 ? (
@@ -340,7 +356,11 @@ export function App({
                         onSelect={setSelectedKey}
                       />
                     ) : (
-                      <Timeline jobs={visibleJobs} onSelect={setSelectedKey} />
+                      <Timeline
+                        jobs={visibleJobs}
+                        selectedKey={selectedJob ? jobUiKey(selectedJob) : null}
+                        onSelect={setSelectedKey}
+                      />
                     )}
                     {visibleCount < filteredJobs.length && (
                       <button
@@ -396,13 +416,19 @@ function SummaryCards({ bundle }: { bundle: ScanBundle }) {
         <small>
           Across{" "}
           {new Set(bundle.jobs.map((job) => evidence(job.scheduler))).size}{" "}
-          schedulers
+          {plural(
+            new Set(bundle.jobs.map((job) => evidence(job.scheduler))).size,
+            "scheduler",
+          )}
         </small>
       </article>
       <article>
         <span>Needs attention</span>
         <strong>{errors}</strong>
-        <small>{bundle.findings.length} total findings</small>
+        <small>
+          {bundle.findings.length} total{" "}
+          {plural(bundle.findings.length, "finding")}
+        </small>
       </article>
       <article>
         <span>Observable next run</span>
@@ -464,6 +490,7 @@ function JobList({
             onClick={() => {
               onSelect(jobUiKey(job));
             }}
+            aria-current={jobUiKey(job) === selectedKey ? "true" : undefined}
             aria-label={`${name}, ${schedulerLabel(evidence(job.scheduler))}`}
           >
             <span
@@ -487,7 +514,9 @@ function JobList({
             <span className="job-status">
               <Outcome job={job} />
               {jobFindings.length > 0 && (
-                <small>{jobFindings.length} finding</small>
+                <small>
+                  {jobFindings.length} {plural(jobFindings.length, "finding")}
+                </small>
               )}
             </span>
           </button>
@@ -499,9 +528,11 @@ function JobList({
 
 function Timeline({
   jobs,
+  selectedKey,
   onSelect,
 }: {
   jobs: readonly ScheduledJob[];
+  selectedKey: string | null;
   onSelect: (id: string) => void;
 }) {
   const known = jobs.filter((job) => evidence(job.nextRun));
@@ -516,6 +547,7 @@ function Timeline({
             onClick={() => {
               onSelect(jobUiKey(job));
             }}
+            aria-current={jobUiKey(job) === selectedKey ? "true" : undefined}
           >
             <span className="timeline-time">{formatRun(job.nextRun)}</span>
             <span className="timeline-dot" aria-hidden="true" />
@@ -538,6 +570,7 @@ function Timeline({
               onClick={() => {
                 onSelect(jobUiKey(job));
               }}
+              aria-current={jobUiKey(job) === selectedKey ? "true" : undefined}
             >
               {evidence(job.displayName)}{" "}
               <span>{schedulerLabel(evidence(job.scheduler))}</span>
@@ -572,35 +605,109 @@ function Inspector({
         </div>
       </div>
       <h3>{evidence(job.displayName) ?? "Unnamed job"}</h3>
-      <p className="native-id">{evidence(job.nativeIdentifier)}</p>
+      <p className="native-id">{evidenceSummary(job.nativeIdentifier)}</p>
       <dl className="evidence-list">
         <EvidenceRow
-          label="Schedule"
-          value={evidence(job.scheduleExplanation)}
+          label="Native identifier"
+          field={job.nativeIdentifier}
+          code
         />
-        <EvidenceRow label="Next run" value={formatRun(job.nextRun)} />
-        <EvidenceRow label="Last run" value={formatRun(job.lastRun)} />
-        <EvidenceRow label="Executable" value={evidence(job.executable)} code />
+        <EvidenceRow label="Owner" field={job.owner} />
+        <EvidenceRow label="Scope" field={job.scope} />
+        <EvidenceRow label="Privilege" field={job.privilegeLevel} />
+        <EvidenceRow label="Enabled" field={job.enabled} />
+        <EvidenceRow
+          label="Schedule expression"
+          field={job.schedule}
+          format={(value) => `${value.kind}: ${value.nativeExpression}`}
+          code
+        />
+        <EvidenceRow
+          label="Schedule explanation"
+          field={job.scheduleExplanation}
+        />
+        <EvidenceRow
+          label="Scheduler timezone"
+          field={job.timezoneBasis}
+          format={(value) => `${value.name} (${value.source})`}
+        />
+        <EvidenceRow
+          label="Next run"
+          field={job.nextRun}
+          format={formatRunValue}
+        />
+        <EvidenceRow
+          label="Last run"
+          field={job.lastRun}
+          format={formatRunValue}
+        />
+        <EvidenceRow
+          label="Last outcome"
+          field={job.lastOutcome}
+          format={(value) =>
+            `${value.state}; native code ${value.nativeCode === null ? "not reported" : String(value.nativeCode)}; ${value.explanation}`
+          }
+        />
+        <EvidenceRow label="Executable" field={job.executable} code />
         <EvidenceRow
           label="Arguments"
-          value={evidence(job.arguments)?.join(" ") ?? "None"}
+          field={job.arguments}
+          format={(value) => value.join(" ") || "None"}
           code
         />
         <EvidenceRow
           label="Working directory"
-          value={evidence(job.workingDirectory)}
+          field={job.workingDirectory}
           code
         />
         <EvidenceRow
           label="Environment keys"
-          value={evidence(job.environmentKeys)?.join(", ") ?? "None reported"}
+          field={job.environmentKeys}
+          format={(value) => value.join(", ") || "None"}
           code
         />
         <EvidenceRow
           label="Native source"
-          value={evidence(job.nativeSource)?.reference}
+          field={job.nativeSource}
+          format={(value) => `${value.sourceType}: ${value.reference}`}
           code
         />
+        <EvidenceRow
+          label="Triggers"
+          field={job.triggers}
+          format={(value) =>
+            value
+              .map(
+                (trigger) =>
+                  `${trigger.kind}: ${trigger.expression} — ${trigger.explanation}`,
+              )
+              .join("; ") || "None"
+          }
+        />
+        <EvidenceRow
+          label="Dependencies"
+          field={job.dependencies}
+          format={(value) => value.join(", ") || "None"}
+          code
+        />
+        <EvidenceRow label="Target service" field={job.targetService} code />
+        <div>
+          <dt>Parse warnings</dt>
+          <dd className={job.parseWarnings.length === 0 ? "unavailable" : ""}>
+            {job.parseWarnings.length === 0 ? (
+              "None"
+            ) : (
+              <ul className="parse-warnings">
+                {job.parseWarnings.map((warning) => (
+                  <li key={`${warning.code}:${warning.sourceReference}`}>
+                    <code>{warning.code}</code>: {warning.message}
+                    <small>Source: {warning.sourceReference}</small>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </dd>
+        </div>
       </dl>
       <section
         className="inspector-findings"
@@ -615,6 +722,7 @@ function Inspector({
               <Severity severity={finding.severity} />
               <strong>{finding.title}</strong>
               <p>{finding.explanation}</p>
+              <FindingEvidence evidence={finding.evidence} />
             </article>
           ))
         )}
@@ -623,22 +731,45 @@ function Inspector({
   );
 }
 
-function EvidenceRow({
+function EvidenceRow<T>({
   label,
-  value,
+  field,
+  format = String,
   code = false,
 }: {
   label: string;
-  value: string | null | undefined;
+  field: Evidence<T>;
+  format?: (value: T) => string;
   code?: boolean;
 }) {
+  const available = field.availability === "available";
+  const value = available
+    ? format(field.value)
+    : `Unavailable: ${unavailableReasonLabel(field.reason)}`;
   return (
     <div>
       <dt>{label}</dt>
-      <dd className={!value ? "unavailable" : ""}>
-        {code && value ? <code>{value}</code> : (value ?? "Unavailable")}
+      <dd className={!available ? "unavailable" : ""}>
+        {code && available ? <code>{value}</code> : value}
+        <small className="evidence-provenance">
+          Source: {field.provenance.sourceReference}
+          {field.provenance.detail ? ` — ${field.provenance.detail}` : ""}
+        </small>
       </dd>
     </div>
+  );
+}
+
+function FindingEvidence({ evidence: items }: { evidence: readonly string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <ul className="finding-evidence" aria-label="Supporting evidence">
+      {items.map((item) => (
+        <li key={item}>
+          <code>{item}</code>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -664,6 +795,7 @@ function FindingsView({
               <h2>{finding.title}</h2>
               <p>{finding.explanation}</p>
               <small>{findingJobNames(finding, jobs)}</small>
+              <FindingEvidence evidence={finding.evidence} />
             </div>
             <code>{finding.code}</code>
           </article>
@@ -871,13 +1003,10 @@ function evidence<T>(field: Evidence<T>): T | null {
 function formatRun(field: ScheduledJob["nextRun"]): string {
   const run = evidence(field);
   if (!run) return "Unknown";
-  const date = new Date(run.iso8601);
-  if (Number.isNaN(date.valueOf())) return run.iso8601;
-  return new Intl.DateTimeFormat(undefined, {
-    weekday: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
+  return formatRunValue(run);
+}
+function formatRunValue(run: RunTime): string {
+  return `${run.iso8601.replace("T", " ")} · ${run.timezoneBasis}`;
 }
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -901,6 +1030,36 @@ function schedulerMonogram(scheduler: SchedulerKind | null): string {
 
 function jobUiKey(job: ScheduledJob): string {
   return `${job.id}:${job.nativeSource.provenance.sourceReference}`;
+}
+
+function compareJobsByNextRun(left: ScheduledJob, right: ScheduledJob): number {
+  const leftRun = evidence(left.nextRun);
+  const rightRun = evidence(right.nextRun);
+  const leftTime = leftRun
+    ? Date.parse(leftRun.iso8601)
+    : Number.POSITIVE_INFINITY;
+  const rightTime = rightRun
+    ? Date.parse(rightRun.iso8601)
+    : Number.POSITIVE_INFINITY;
+  const safeLeft = Number.isNaN(leftTime) ? Number.POSITIVE_INFINITY : leftTime;
+  const safeRight = Number.isNaN(rightTime)
+    ? Number.POSITIVE_INFINITY
+    : rightTime;
+  return safeLeft === safeRight ? 0 : safeLeft - safeRight;
+}
+
+function unavailableReasonLabel(reason: string): string {
+  return reason.replace(/([a-z])([A-Z])/g, "$1 $2").toLocaleLowerCase();
+}
+
+function evidenceSummary<T>(field: Evidence<T>): string {
+  return field.availability === "available"
+    ? String(field.value)
+    : `Unavailable: ${unavailableReasonLabel(field.reason)}`;
+}
+
+function plural(count: number, singular: string): string {
+  return count === 1 ? singular : `${singular}s`;
 }
 
 function findingJobNames(
@@ -935,19 +1094,9 @@ async function renderExport(
       reviewed: policy.reviewed,
       includeArguments: policy.includeArguments,
     });
-  const jobs = bundle.jobs.map((job) => ({
-    ...job,
-    arguments:
-      policy.includeArguments || job.arguments.availability === "unavailable"
-        ? job.arguments
-        : { ...job.arguments, value: ["<redacted>"] },
-  }));
-  return JSON.stringify(
-    { schemaVersion: "1.0", jobs, findings: bundle.findings },
-    null,
-    2,
-  );
+  return renderBrowserExport(bundle, format, policy);
 }
+
 function isTauri(): boolean {
   return "__TAURI_INTERNALS__" in window;
 }
