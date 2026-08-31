@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://drewmauldin.github.io/jobglass/sitemap.xml

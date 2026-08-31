@@ -1,0 +1,16 @@
+[
+  {
+    "identifier": "\\JobGlass\\User Cleanup",
+    "nextRunTime": "2026-09-01T04:00:00Z",
+    "lastRunTime": "2026-08-31T04:00:00Z",
+    "lastTaskResult": 0,
+    "state": "Ready"
+  },
+  {
+    "identifier": "\\JobGlass\\System Backup",
+    "nextRunTime": null,
+    "lastRunTime": "2026-08-30T01:00:00Z",
+    "lastTaskResult": 5,
+    "state": "Disabled"
+  }
+]

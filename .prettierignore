@@ -1,0 +1,8 @@
+node_modules
+dist
+coverage
+playwright-report
+src-tauri/target
+package-lock.json
+Cargo.lock
+LICENSE

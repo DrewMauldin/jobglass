@@ -1,0 +1,43 @@
+name: Feature request
+description: Propose a focused read-only evidence improvement.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: JobGlass is intentionally read-only and local-only. Scheduler mutation, elevation, telemetry, accounts, remote management, AI classification, or environment values require a new public specification and threat-model review.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What evidence or workflow is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the smallest useful user-visible result, not an implementation.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Primary platform
+      options:
+        - Cross-platform
+        - macOS
+        - Linux
+        - Windows
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Native evidence source
+      description: Name the documented read-only interface, if known.
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Product boundary
+      options:
+        - label: The request can remain local-only, read-only, unelevated, and free of environment values.
+          required: true

@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta
+      name="description"
+      content="JobGlass is a free, local-first, read-only desktop inspector for launchd, cron, systemd timers, and Windows Task Scheduler."
+    />
+    <meta name="theme-color" content="#0f2e28" />
+    <meta property="og:title" content="JobGlass — See what runs next." />
+    <meta
+      property="og:description"
+      content="Understand native scheduled jobs without accounts, telemetry, cloud services, or scheduler mutations."
+    />
+    <meta
+      property="og:image"
+      content="https://drewmauldin.github.io/jobglass/media/jobglass-light.png"
+    />
+    <meta property="og:type" content="website" />
+    <link rel="canonical" href="https://drewmauldin.github.io/jobglass/" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>JobGlass — See what runs next.</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="JobGlass home">
+        <span class="brand-mark" aria-hidden="true">JG</span>
+        <span>JobGlass</span>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a href="#evidence">Evidence</a>
+        <a href="#privacy">Privacy</a>
+        <a href="https://github.com/DrewMauldin/jobglass">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Free · open source · local only</p>
+          <h1>See what runs next.</h1>
+          <p class="lede">
+            One calm, searchable evidence view for launchd, cron, systemd
+            timers, and Windows Task Scheduler. No accounts. No telemetry. No
+            scheduler mutations.
+          </p>
+          <div class="actions">
+            <a
+              class="button primary"
+              href="https://github.com/DrewMauldin/jobglass/releases"
+              >View releases</a
+            >
+            <a
+              class="button secondary"
+              href="https://github.com/DrewMauldin/jobglass#readme"
+              >Read the guide</a
+            >
+          </div>
+          <p class="release-note">
+            Community packages are unsigned. Verify checksums and provenance
+            before installation.
+          </p>
+        </div>
+        <div class="hero-visual">
+          <img
+            src="media/jobglass-light.png"
+            alt="JobGlass inspecting a real macOS launchd scan"
+            width="1162"
+            height="768"
+          />
+        </div>
+      </section>
+
+      <section class="trust-strip" aria-label="Product principles">
+        <p>
+          <strong>Read-only</strong
+          ><span>Cannot run, edit, or disable jobs</span>
+        </p>
+        <p>
+          <strong>Evidence first</strong
+          ><span>Unknown values stay unknown</span>
+        </p>
+        <p>
+          <strong>Private by design</strong
+          ><span>Environment values never enter the model</span>
+        </p>
+      </section>
+
+      <section class="section" id="evidence">
+        <div class="section-heading">
+          <p class="eyebrow">Native evidence, one model</p>
+          <h2>Understand the schedule without flattening the truth.</h2>
+          <p>
+            JobGlass preserves native expressions, source provenance, parse
+            warnings, and permission limits while making the result easy to
+            scan.
+          </p>
+        </div>
+        <div class="feature-grid">
+          <article>
+            <span aria-hidden="true">01</span>
+            <h3>Find the job</h3>
+            <p>
+              Search commands, schedules, names, and identifiers. Move between a
+              paged list and timeline without losing your filter.
+            </p>
+          </article>
+          <article>
+            <span aria-hidden="true">02</span>
+            <h3>Inspect the source</h3>
+            <p>
+              See definitions, runtime outcomes, privilege, triggers,
+              dependencies, and explicit unavailable reasons with their
+              provenance.
+            </p>
+          </article>
+          <article>
+            <span aria-hidden="true">03</span>
+            <h3>Review deterministic findings</h3>
+            <p>
+              Surface overlaps, duplicates, path faults, stale outcomes,
+              environment-key differences, malformed definitions, and visibility
+              gaps.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section privacy" id="privacy">
+        <div>
+          <p class="eyebrow">A deliberate export boundary</p>
+          <h2>Sharing starts with a privacy checkpoint.</h2>
+          <p>
+            JSON, CSV, and self-contained HTML remain local. Arguments are
+            redacted by default; environment values are structurally absent.
+            Paths and identifiers can still reveal a machine, so every export
+            requires review.
+          </p>
+          <a
+            class="text-link"
+            href="https://github.com/DrewMauldin/jobglass/blob/main/docs/privacy.md"
+            >Read the privacy model →</a
+          >
+        </div>
+        <img
+          src="media/jobglass-export-review.png"
+          alt="JobGlass export review dialog with arguments redacted by default"
+          width="1162"
+          height="768"
+        />
+      </section>
+
+      <section class="section platforms">
+        <div class="section-heading">
+          <p class="eyebrow">v0.1.0 platform evidence</p>
+          <h2>Built across three operating systems. Claimed honestly.</h2>
+        </div>
+        <div class="platform-grid">
+          <article>
+            <h3>macOS 13+</h3>
+            <p>
+              Real launchd runtime, visual, accessibility-tree, performance,
+              fixture, test, and package evidence.
+            </p>
+          </article>
+          <article>
+            <h3>Linux</h3>
+            <p>
+              Cron and systemd fixture, test, hosted compilation, and package
+              evidence. No native visual-runtime claim yet.
+            </p>
+          </article>
+          <article>
+            <h3>Windows 10/11</h3>
+            <p>
+              Task Scheduler fixture, test, hosted compilation, and package
+              evidence. No native visual-runtime claim yet.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="closing">
+        <p class="eyebrow">Apache-2.0</p>
+        <h2>Your scheduler evidence should belong to you.</h2>
+        <p>
+          Inspect the source, build it yourself, improve a fixture, or use the
+          unsigned community release after verifying it.
+        </p>
+        <div class="actions">
+          <a
+            class="button primary"
+            href="https://github.com/DrewMauldin/jobglass"
+            >View source on GitHub</a
+          >
+          <a
+            class="button secondary light"
+            href="https://github.com/DrewMauldin/jobglass/blob/main/CONTRIBUTING.md"
+            >Contribute</a
+          >
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>JobGlass · See what runs next.</p>
+      <p>
+        <a href="https://github.com/DrewMauldin/jobglass/blob/main/SECURITY.md"
+          >Security</a
+        >
+        ·
+        <a href="https://github.com/DrewMauldin/jobglass/blob/main/LICENSE"
+          >Apache-2.0</a
+        >
+      </p>
+    </footer>
+  </body>
+</html>

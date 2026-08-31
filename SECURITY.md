@@ -21,14 +21,14 @@ JobGlass is deliberately read-only. The Rust core may read allowlisted native sc
 
 ### Trust boundaries and abuse cases
 
-| Boundary | Threats | Required controls |
-|---|---|---|
-| Native files -> Rust parser | Malicious XML/text, huge files, invalid encodings, symlink escape, path tricks | Size caps, type checks, no-follow metadata checks, bounded decoding, allowlisted roots, warnings instead of panics |
-| Native tools -> Rust adapter | Localised or malformed output, hangs, attacker-controlled identifiers | Fixed executable and argument arrays, no shell, validated identifiers, timeouts, output caps, typed parsing |
-| Rust -> WebView IPC | Over-broad privilege or unintended sensitive fields | Two custom read-only commands, restrictive capability, serialisable allowlisted DTOs, environment keys only |
-| Model -> UI | Stored XSS or misleading evidence | React text escaping, no raw HTML, provenance displayed, unavailable values labelled |
-| Model -> exports | Secret leakage through arguments, paths or environment | Mandatory review policy, arguments redacted by default, environment values absent by construction, self-contained escaped HTML |
-| Release artifacts -> users | Tampering, dependency compromise, unsigned binary confusion | Lockfiles, audits, checksums, SBOM, provenance where available, explicit signing status |
+| Boundary                     | Threats                                                                        | Required controls                                                                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native files -> Rust parser  | Malicious XML/text, huge files, invalid encodings, symlink escape, path tricks | Size caps, type checks, no-follow metadata checks, bounded decoding, allowlisted roots, warnings instead of panics                                          |
+| Native tools -> Rust adapter | Localised or malformed output, hangs, attacker-controlled identifiers          | Fixed executable and argument arrays, no shell, validated identifiers, end-to-end timeouts, process-tree termination, output and record caps, typed parsing |
+| Rust -> WebView IPC          | Over-broad privilege or unintended sensitive fields                            | Two custom read-only commands, restrictive capability, serialisable allowlisted DTOs, environment keys only                                                 |
+| Model -> UI                  | Stored XSS or misleading evidence                                              | React text escaping, no raw HTML, provenance displayed, unavailable values labelled                                                                         |
+| Model -> exports             | Secret leakage through arguments, paths or environment                         | Mandatory review policy, arguments redacted by default, environment values absent by construction, self-contained escaped HTML                              |
+| Release artifacts -> users   | Tampering, dependency compromise, unsigned binary confusion                    | Lockfiles, audits, checksums, SBOM, provenance where available, explicit signing status                                                                     |
 
 ### STRIDE summary
 

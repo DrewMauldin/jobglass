@@ -1,0 +1,4 @@
+* text=auto eol=lf
+
+# Preserve the byte-accurate UTF-16 fixture without newline conversion.
+fixtures/windows/multiple-tasks.xml -text
