@@ -1,12 +1,23 @@
 #!/bin/sh
 set -eu
 
+profile=local
+if [ "$#" -eq 2 ] && [ "$1" = "--hosted" ]; then
+  profile=hosted
+  shift
+fi
 if [ "$#" -ne 1 ] || [ ! -x "$1" ]; then
-  printf 'usage: scripts/measure-launch.sh /path/to/jobglass-executable\n' >&2
+  printf 'usage: scripts/measure-launch.sh [--hosted] /path/to/jobglass-executable\n' >&2
   exit 64
 fi
 
 executable=$1
+warm_budget_ms=1500
+collect_budget_ms=1000
+diagnostics_budget_ms=500
+if [ "$profile" = "hosted" ]; then
+  warm_budget_ms=5000
+fi
 receipt_dir=$(mktemp -d)
 receipt_log=$receipt_dir/jobglass-launch.log
 app_pid=
@@ -54,5 +65,22 @@ wait "$app_pid" 2>/dev/null || true
 app_pid=
 
 measure_launch
-printf 'warm-launch-ms=%s prime-launch-ms=%s %s %s\n' "$elapsed_ms" "$prime_ms" "$collect_receipt" "$scan_receipt"
-awk -v elapsed="$elapsed_ms" 'BEGIN { exit !(elapsed < 1500) }'
+collect_ms=$(printf '%s\n' "$collect_receipt" | perl -ne 'print $1 if /"collectMs":([0-9]+(?:\.[0-9]+)?)/')
+diagnostics_ms=$(printf '%s\n' "$scan_receipt" | perl -ne 'print $1 if /"diagnosticsMs":([0-9]+(?:\.[0-9]+)?)/')
+if [ -z "$collect_ms" ] || [ -z "$diagnostics_ms" ]; then
+  printf 'JobGlass emitted an incomplete performance receipt.\n' >&2
+  exit 1
+fi
+printf 'profile=%s warm-launch-ms=%s prime-launch-ms=%s warm-budget-ms=%s collect-budget-ms=%s diagnostics-budget-ms=%s %s %s\n' \
+  "$profile" "$elapsed_ms" "$prime_ms" "$warm_budget_ms" "$collect_budget_ms" "$diagnostics_budget_ms" "$collect_receipt" "$scan_receipt"
+if ! awk \
+  -v elapsed="$elapsed_ms" \
+  -v collect="$collect_ms" \
+  -v diagnostics="$diagnostics_ms" \
+  -v warm_budget="$warm_budget_ms" \
+  -v collect_budget="$collect_budget_ms" \
+  -v diagnostics_budget="$diagnostics_budget_ms" \
+  'BEGIN { exit !(elapsed < warm_budget && collect < collect_budget && diagnostics < diagnostics_budget) }'; then
+  printf 'JobGlass exceeded a configured launch or scan budget.\n' >&2
+  exit 1
+fi

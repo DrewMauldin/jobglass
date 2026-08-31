@@ -163,9 +163,9 @@ jobs:
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - name: Build unsigned package
         run: npm run tauri:build -- --bundles ${{ matrix.bundles }}
-      - name: Enforce warm launch budget on the release binary
+      - name: Enforce hosted launch and scan budgets on the release binary
         if: runner.os == 'macOS'
-        run: scripts/measure-launch.sh src-tauri/target/release/jobglass
+        run: scripts/measure-launch.sh --hosted src-tauri/target/release/jobglass
       - name: Upload package for release assembly
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
