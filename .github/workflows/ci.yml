@@ -65,7 +65,7 @@ jobs:
           rustup default 1.98.0
 
       - name: Cache Rust builds
-        uses: Swatinem/rust-cache@bc2d2e71bd35c5549942babaa51a89c586b981d1 # v2.8.1
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
         with:
           workspaces: src-tauri -> target
 
@@ -140,7 +140,7 @@ jobs:
           rustup toolchain install 1.98.0 --profile minimal --component llvm-tools-preview --no-self-update
           rustup default 1.98.0
       - name: Cache Rust builds
-        uses: Swatinem/rust-cache@bc2d2e71bd35c5549942babaa51a89c586b981d1 # v2.8.1
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1 # v2.8.1
         with:
           workspaces: src-tauri -> target
       - name: Install coverage tool
