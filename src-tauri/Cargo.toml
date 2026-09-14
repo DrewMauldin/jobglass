@@ -47,7 +47,7 @@ proptest = "=1.11.0"
 tempfile = "=3.27.0"
 
 [dependencies.plist]
-version = "=1.10.0"
+version = "=1.10.1"
 
 [dependencies.roxmltree]
 version = "=0.21.1"
